@@ -143,6 +143,10 @@ The precise OS mounts, unprivileged identity and availability of namespace contr
 
 If any gate cannot be demonstrated on this host, the increment stops at the design; it does not fall back to a weaker boundary.
 
+The concrete checks, ordering rule and the host's currently observed capabilities are in
+[the isolation checklist](2026-11-09-isolation-checklist.md), which also records that none of
+the five gates has been demonstrated yet.
+
 The supervisor owns artifacts, readback and teardown. A target-writable ready file cannot determine the run verdict. Target output is untrusted; validate it before projecting it. Protect supervisor manifests from child writes.
 
 ### 4.4 Result and failure protocol (D2, D4, D5)
