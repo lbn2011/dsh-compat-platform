@@ -805,8 +805,16 @@ returns a partial walk as if it were complete (`counts` is `null`, `inventory` i
   `tag:yaml.org,2002:` namespace and is classified `CORE_NOT_ALLOWED`. The fix was to the test
   assertion and its description only; the implementation was **not** changed to suit the test.
   Both records stand; neither is retracted.
-- **Boundaries still pending:** ingestion of a real host's `dsh --dump-config` export, hostile-host
-  behavior, cross-Node-version behavior, and host compatibility. Non-UTF-8 and over-limit files
+- **A separate bounded replay of retained captures passed (2026-11-08).** The committed CLI
+  was run once per sample against three historical `stdout.bin` captures — `333`, `162` and
+  `568` bytes — produced earlier by a real CLI over a synthetic fixture home. All three
+  reproduced the pre-fixed summary shape and counters: exit `0`, empty stderr, `verdict=pass`,
+  `3/3`. This is not a re-export on this host, adds **no** test cases (`65/65` above is
+  unchanged and these three samples are not "68 tests"), and says nothing about export
+  completeness, plugin loadability or hostile hosts. The record is
+  [`docs/testing/2026-11-08-profile-dump-retained-export.md`](../../docs/testing/2026-11-08-profile-dump-retained-export.md).
+- **Boundaries still pending:** a fresh host-export-to-diagnostic run, production-scale profile
+  coverage, hostile-host behavior, cross-Node-version behavior, and host compatibility. Non-UTF-8 and over-limit files
   were tested through the CLI's imported `main`; only the valid-file case also exercised a real
   CLI subprocess. Stream failure tests cover the specific fake sinks and Node Writable case in
   this file, not every possible stream implementation. Any future execution on this machine
