@@ -1,0 +1,10 @@
+# Synthetic entry-list profile used to demonstrate a repair plan.
+# It is never loaded by any DSH runtime: nothing in this repository applies a plan.
+- id: repair-demo-alpha
+  name: ./plugin-alpha.mjs
+  disabled: false
+- id: repair-demo-beta
+  name: ./plugin-beta.mjs
+  disabled: true
+- id: repair-demo-gamma
+  name: ./plugin-gamma.mjs

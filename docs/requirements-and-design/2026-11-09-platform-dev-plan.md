@@ -97,6 +97,12 @@ Gate: pure tests only (plan validation, stale refusal, unknown-operation refusal
 no file outside the test temp directory is ever written; the record says plainly that no repair has
 been applied.
 
+**Status 2026-11-09: done.** `packages/repair` ships `repair-plan/0.1-draft.1` and a preview that
+writes nothing; 25 pure tests, two bounded green rounds (fixture byte-identical before and after the
+preview), record `docs/testing/2026-11-09-repair-plan.md`. The record states plainly that no repair
+has been applied and that no apply path exists. The gate's "no file outside the test temp directory"
+is stronger in the delivered code: the package performs no file I/O at all, which a test asserts.
+
 ### S4 — P4 second increment: approval and receipts, still on a fixture  *(needs the S3 review)*
 
 - Typed plan → preview → **explicit approval record** (a signed-in user action, represented as a

@@ -1,0 +1,19 @@
+{
+  "planVersion": "repair-plan/0.1-draft.1",
+  "operation": {
+    "kind": "set-entry-flag",
+    "entryIndex": 1,
+    "field": "disabled",
+    "value": true
+  },
+  "precondition": {
+    "documentSha256": "cb17e29249858665802437256e8faa5f1e11113382681d19e7646152b13d3bca",
+    "revision": "examples/repair/profile.yml@initial"
+  },
+  "expectedPostcondition": {
+    "documentSha256": "06003af13846506e71523eddb40e306e1241d107577640683e81b3498cd8d601",
+    "entryIndex": 1,
+    "field": "disabled",
+    "value": true
+  }
+}
