@@ -120,6 +120,31 @@ export function checkEvidenceIsolation(writeAttempts) {
   return null
 }
 
+// Errno values that mean the outbound attempt never left the boundary. Any
+// other outcome — a successful connect, or an error the sandbox did not cause —
+// must not be reported as a denial.
+export const NETWORK_DENY_CODES = Object.freeze([
+  'ENETUNREACH',
+  'ENETDOWN',
+  'EHOSTUNREACH',
+  'ECONNREFUSED',
+  'EACCES',
+  'EPERM',
+  'ENOENT',
+  'EAI_AGAIN',
+])
+
+// The network word is a decision about an observation, so it lives here with the
+// other closed vocabularies: an attempt the sandbox refused is `denied`, a
+// successful connect is `reachable` (never called a denial), and anything else —
+// no attempt, no record, an unclassified errno — is `unknown`.
+export function networkVerdict(attempt) {
+  if (attempt === null || typeof attempt !== 'object' || attempt.attempted !== true) return 'unknown'
+  if (attempt.ok === true) return 'reachable'
+  if (typeof attempt.code === 'string' && NETWORK_DENY_CODES.includes(attempt.code)) return 'denied'
+  return 'unknown'
+}
+
 // Sentinels are launcher-controlled probes. Each must show the boundary held.
 export function checkSentinels(sentinels) {
   if (sentinels === null || typeof sentinels !== 'object') return REFUSALS.sentinel

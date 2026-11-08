@@ -21,8 +21,10 @@ HASHED=(scripts/trusted-extraction-batch/run.sh scripts/trusted-extraction-batch
         packages/runtime/src/child-probe.js packages/runtime/src/trusted-extraction-adapter.js
         packages/runtime/src/trusted-extraction-receipt.js packages/runtime/src/trusted-extraction-supervisor.js
         packages/runtime/tests/isolation-policy.test.js packages/runtime/tests/trusted-extraction-receipt.test.js
+        scripts/trusted-extraction-batch/failure-paths.mjs
         examples/trusted-extraction/config.yml examples/trusted-extraction/plugin-ok.mjs
-        examples/trusted-extraction/plugin-import-throw.mjs examples/trusted-extraction/plugin-activate-throw.mjs)
+        examples/trusted-extraction/plugin-import-throw.mjs examples/trusted-extraction/plugin-activate-throw.mjs
+        examples/trusted-extraction/config-hang.yml examples/trusted-extraction/plugin-hang.mjs)
 hashset "${HASHED[@]}" > "$RUN_DIR/hashes-before.txt" || exit 75
 
 systemd-run --unit "$UNIT" --wait --pipe --collect \
@@ -44,7 +46,7 @@ systemctl show "$UNIT" -p LoadState -p ActiveState -p SubState -p MainPID >> "$R
 {
   echo "acceptance_exit=$rc"
   echo "run_dir=$RUN_DIR"
-  grep -E '^(verdict|isolation_exit|fixture_exit|tests_exit|static_contract)=' "$RUN_DIR"/*.txt 2>/dev/null || true
+  grep -E '^(verdict|isolation_exit|fixture_exit|failure_paths_exit|tests_exit|static_contract)=' "$RUN_DIR"/*.txt 2>/dev/null || true
   grep -E '^(memory_peak|pids_peak)=' "$RUN_DIR/peaks.txt" 2>/dev/null || true
 } | tee "$RUN_DIR/summary.txt"
 exit "$rc"

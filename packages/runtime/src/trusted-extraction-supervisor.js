@@ -8,13 +8,14 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 
 import {
   ALLOWED_MOUNTS,
   BUDGET,
   POLICY_VERSION,
   REFUSALS,
+  networkVerdict,
   checkBudget,
   evaluateGates,
 } from './isolation-policy.js'
@@ -55,10 +56,13 @@ function sandboxArgs({ fixtureRoot, outDir, entryName, entryArgs }) {
   return args
 }
 
-function runSandbox(args) {
+// `timeoutMs` is the phase budget, not the outer limit: the outer limit exists
+// so there is time to kill, reap and read back after the phase budget expires.
+function runSandbox(args, { timeoutMs = BUDGET.phaseSeconds * 1000, killSignal = 'SIGKILL' } = {}) {
   const result = spawnSync(BWRAP, args, {
     encoding: 'utf8',
-    timeout: BUDGET.outerSeconds * 1000,
+    timeout: timeoutMs,
+    killSignal,
     maxBuffer: 1024 * 1024,
   })
   return {
@@ -81,7 +85,7 @@ function readJson(path) {
 // One isolation pass. Returns the ordered gate verdict and the raw observations.
 // The caller decides whether to keep the artifacts; the temp dir is removed here
 // unless `keepDir` names a destination.
-export function probeIsolation({ supervisorPaths = [], sentinels = [], keepDir = null }) {
+export function probeIsolation({ supervisorPaths = [], sentinels = [], keepDir = null, networkTarget = '1.1.1.1:443' }) {
   const budgetRefusal = checkBudget(BUDGET)
   if (budgetRefusal !== null) {
     return { gates: { gate: 'budget', refusal: budgetRefusal }, observations: null, artifacts: null }
@@ -96,6 +100,7 @@ export function probeIsolation({ supervisorPaths = [], sentinels = [], keepDir =
         '--out', '/out',
         ...supervisorPaths.flatMap((path) => ['--supervisor-path', path]),
         ...sentinels.flatMap((path) => ['--sentinel', path]),
+        ...(networkTarget === null ? [] : ['--network-target', networkTarget]),
       ],
     })
     const run = runSandbox(args)
@@ -103,6 +108,7 @@ export function probeIsolation({ supervisorPaths = [], sentinels = [], keepDir =
     const childMounts = readJson(join(dir, 'child-mounts.json')) ?? []
     const writeAttempts = readJson(join(dir, 'write-attempts.json')) ?? []
     const sentinelReads = readJson(join(dir, 'sentinel-reads.json')) ?? []
+    const networkAttempt = readJson(join(dir, 'network-attempt.json'))
 
     // Every sentinel read must have failed; the child only gets paths the
     // policy does not mount, so failure is expected as ENOENT or EACCES.
@@ -110,7 +116,9 @@ export function probeIsolation({ supervisorPaths = [], sentinels = [], keepDir =
       outOfPolicyRead: sentinelReads.length > 0 && sentinelReads.every((row) => row.ok === false) ? 'denied' : 'readable',
       outOfPolicyWrite: writeAttempts.filter((row) => row.label.startsWith('supervisor:'))
         .every((row) => row.ok === false) ? 'denied' : 'writable',
-      networkConnect: run.status === 0 ? 'denied' : 'unknown',
+      // Observed, not inferred: the child made one outbound attempt and
+      // reported its errno; the word itself is decided by the policy module.
+      networkConnect: networkVerdict(networkAttempt),
       unixSocket: 'absent',
       descendants: run.status === 0 ? 'none' : 'unknown',
     }
@@ -127,7 +135,7 @@ export function probeIsolation({ supervisorPaths = [], sentinels = [], keepDir =
     const artifacts = keepDir === null ? null : keepDir
     if (artifacts !== null) {
       mkdirSync(artifacts, { recursive: true })
-      for (const name of ['child-identity.json', 'child-mounts.json', 'write-attempts.json', 'sentinel-reads.json']) {
+      for (const name of ['child-identity.json', 'child-mounts.json', 'write-attempts.json', 'sentinel-reads.json', 'network-attempt.json']) {
         const source = join(dir, name)
         try {
           copyFileSync(source, join(artifacts, name))
@@ -136,14 +144,14 @@ export function probeIsolation({ supervisorPaths = [], sentinels = [], keepDir =
         }
       }
     }
-    return { gates, observations: { run, identity, childMounts, writeAttempts, sentinelReads, sentinelVerdict }, artifacts }
+    return { gates, observations: { run, identity, childMounts, writeAttempts, sentinelReads, networkAttempt, sentinelVerdict }, artifacts }
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 }
 
-export function observeFixture({ installationRoot, modulesRoot, configPath, supervisorPaths = [], sentinels = [], keepDir = null }) {
-  const budgetRefusal = checkBudget(BUDGET)
+export function observeFixture({ installationRoot, modulesRoot, configPath, supervisorPaths = [], sentinels = [], keepDir = null, budget = BUDGET }) {
+  const budgetRefusal = checkBudget(budget)
   if (budgetRefusal !== null) {
     return { refused: budgetRefusal, receipt: buildReceipt({ status: 'refused', gate: { gate: 'budget', refusal: budgetRefusal }, cleanup: 'not-attempted', entries: [], phases: null, runtime: null, inputWitness: null }) }
   }
@@ -174,11 +182,11 @@ export function observeFixture({ installationRoot, modulesRoot, configPath, supe
       entryArgs: [
         '--installation', installationRoot,
         '--modules-root', modulesRoot,
-        '--config', '/run-fixture/config.yml',
+        '--config', '/run-fixture/' + basename(configPath),
         '--out', '/out/adapter.json',
       ],
     })
-    const run = runSandbox(args)
+    const run = runSandbox(args, { timeoutMs: budget.phaseSeconds * 1000 })
     const adapter = readJson(join(outDir, 'adapter.json'))
     const phases = adapter?.phases ?? null
     const cleanup = phases?.cleanup === 'observed' && run.status === 0 ? 'confirmed' : 'unconfirmed'

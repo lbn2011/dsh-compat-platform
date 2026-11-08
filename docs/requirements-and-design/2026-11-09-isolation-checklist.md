@@ -1,6 +1,6 @@
 # Isolation checklist for the trusted-extraction path
 
-> Date: 2026-11-09 · Status: **gates 1, 2, 3 and 5 demonstrated in one bounded round; gate 4 asserted statically.** Companion to
+> Date: 2026-11-09 · Status: **all five gates demonstrated in bounded rounds; gate 4's kill path ran with a reduced demo budget.** Companion to
 > [the trusted-extraction design](2026-11-09-trusted-extraction-design.md) §4.3.
 >
 > Purpose: turn the five gates in the design into checks that either pass with recorded
@@ -97,14 +97,20 @@ each phase deadline expires strictly earlier.
 1. `OuterLimit > Sum(phaseDeadlines) + ReserveKill + ReserveReadback`, asserted numerically
    by the launcher before launch (proposed: 120 s outer, 90 s phase budget, 10 s kill grace,
    20 s readback).
-2. A deliberately hanging fixture is terminated at its phase deadline and the run records
-   `DEADLINE_EXCEEDED` with `cleanup: confirmed`, not a truncated green.
+2. A deliberately hanging fixture is terminated at its phase deadline, and the run records the
+   outcome the code actually produces — measured as `status: incomplete`, `cleanup: unconfirmed`,
+   `process.timedOut: true`, `signal: SIGKILL` — never a truncated green. (This checklist first
+   guessed `DEADLINE_EXCEEDED` with `cleanup: confirmed`; the shipped code says `unconfirmed`
+   because the adapter never wrote its phases, which is the honest word.)
 3. Terminal readback still succeeds after the forced kill.
 
 **Refusal.** Arithmetic mismatch, or a run that cannot confirm termination →
 `ISOLATION_BUDGET_INVALID` / `CLEANUP_UNCONFIRMED`.
 
-**Status.** Demonstrated 2026-11-09: 120 s > 80 + 10 + 20 asserted statically; not yet demonstrated by a hanging fixture (§3 notes the reserve is static).
+**Status.** Demonstrated 2026-11-09 (`docs/testing/2026-11-09-trusted-extraction-failure-paths.md`):
+the kill path ran with a **3 s** demo budget and produced `incomplete`/`unconfirmed`/`timedOut`
+with no surviving process. The arithmetic for the shipped 80 s budget (120 > 80 + 10 + 20) is still
+only asserted statically — the mechanism is proven, the shipped duration is not exercised.
 
 ## 6. Gate 5 — Isolation acceptance with sentinels
 
@@ -114,8 +120,9 @@ each phase deadline expires strictly earlier.
 1. **Read denial:** a host sentinel file outside the policy is unreadable; the attempt is
    recorded (error class only, never the sentinel contents).
 2. **Write denial:** a host path outside the policy cannot be created or appended to.
-3. **Network denial:** a connection attempt to a launcher-controlled listener on the host
-   fails; the listener records zero accepted connections.
+3. **Network denial:** the child makes one outbound attempt from inside the sandbox and reports the
+   errno; only an errno in `NETWORK_DENY_CODES` counts as denial, a successful connect is
+   `reachable`, and anything unclassified is `unknown` (which fails the gate).
 4. **Socket denial:** a host Unix socket path is not present in the child's filesystem.
 5. **Descendant reaping:** a fixture that spawns a child leaves no process in the unit's
    cgroup after termination (`pids.peak` returns to zero, `MainPID` 0).
@@ -123,7 +130,10 @@ each phase deadline expires strictly earlier.
 **Refusal.** Any sentinel readable, any write succeeding, any connection accepted, or any
 surviving descendant → `ISOLATION_SENTINEL_FAILURE`.
 
-**Status.** Demonstrated 2026-11-09 for read/write denial and descendant reaping (MainPID=0); network denial rests on `--unshare-net` rather than an observed refusal (§3, §6 of the record).
+**Status.** Demonstrated 2026-11-09: read denial (`ENOENT`), write denial, socket absence and
+descendant reaping (`MainPID=0`), plus an **observed** network refusal — the child's attempt to
+`1.1.1.1:443` returned `ENETUNREACH`, which `networkVerdict` maps to `denied`
+(`docs/testing/2026-11-09-trusted-extraction-failure-paths.md` §4).
 
 ## 7. What would count as evidence
 

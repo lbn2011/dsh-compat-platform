@@ -1,0 +1,5 @@
+# One entry whose activation never settles. Used only to prove the phase budget:
+# the supervisor must kill it, reap it, and write an incomplete receipt.
+# Synthetic; never loaded outside the sandbox; not a statement about any plugin.
+- id: hang
+  name: ./plugin-hang.mjs

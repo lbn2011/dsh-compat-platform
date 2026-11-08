@@ -1,16 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import {
-  BUDGET,
-  REFUSALS,
-  checkBudget,
-  checkEvidenceIsolation,
-  checkIdentity,
-  checkMounts,
-  checkSentinels,
-  evaluateGates,
-} from '../src/isolation-policy.js'
+import { BUDGET, NETWORK_DENY_CODES, REFUSALS, checkBudget, checkEvidenceIsolation, checkIdentity, checkMounts, checkSentinels, evaluateGates, networkVerdict } from '../src/isolation-policy.js'
 
 const OK_IDENTITY = {
   uid: 65534,
@@ -140,6 +131,25 @@ test('every sentinel must show the boundary held', () => {
     assert.equal(checkSentinels({ ...OK_SENTINELS, [key]: value }), REFUSALS.sentinel)
   }
   assert.equal(checkSentinels(null), REFUSALS.sentinel)
+})
+
+test('the network word is decided by the observation, not by the launcher', () => {
+  assert.equal(networkVerdict({ attempted: true, ok: false, code: 'ENETUNREACH' }), 'denied')
+  assert.equal(networkVerdict({ attempted: true, ok: false, code: 'ECONNREFUSED' }), 'denied')
+  for (const code of NETWORK_DENY_CODES) {
+    assert.equal(networkVerdict({ attempted: true, ok: false, code }), 'denied')
+  }
+  // A successful connect is never a denial, and an errno nobody classified is
+  // not evidence either way.
+  assert.equal(networkVerdict({ attempted: true, ok: true, code: null }), 'reachable')
+  assert.equal(networkVerdict({ attempted: true, ok: false, code: 'TIMEOUT' }), 'unknown')
+  assert.equal(networkVerdict({ attempted: true, ok: false, code: 'SOMETHING_NEW' }), 'unknown')
+  assert.equal(networkVerdict({ attempted: false, ok: false, code: 'NOT-REQUESTED' }), 'unknown')
+  assert.equal(networkVerdict(null), 'unknown')
+  assert.equal(networkVerdict(undefined), 'unknown')
+  // 'reachable' must fail the sentinel gate, so a leaked network is a refusal.
+  assert.equal(checkSentinels({ ...OK_SENTINELS, networkConnect: 'reachable' }), REFUSALS.sentinel)
+  assert.equal(checkSentinels({ ...OK_SENTINELS, networkConnect: 'unknown' }), REFUSALS.sentinel)
 })
 
 test('gates are evaluated in order and stop at the first refusal', () => {

@@ -5,7 +5,8 @@ Bounded launcher for one trusted-extraction observation round, and its payload.
 ## Status
 
 EXECUTED. Two clean green rounds on 2026-11-09 (plus harness-fix attempts recorded in
-`docs/testing/2026-11-09-trusted-extraction.md`).
+`docs/testing/2026-11-09-trusted-extraction.md`), then two more green rounds after the failure-path
+step was added (`docs/testing/2026-11-09-trusted-extraction-failure-paths.md`).
 
 ## Usage
 
@@ -23,10 +24,14 @@ One invocation is one round. Output goes to
 2. `bash -n` and `node --check` on every file it runs.
 3. Static contract: package is private, zero-dependency, every export target exists, budget
    slack is positive, guard lists are the fixed ones.
-4. Unit tests (`28/28`).
-5. Isolation gates 1–5 in a bubblewrap sandbox.
+4. Unit tests (`29/29`).
+5. Isolation gates 1–5 in a bubblewrap sandbox, including one outbound attempt observed from
+   inside the sandbox.
 6. Fixture observation: five phases, four entry outcomes, receipt shape check.
-7. yaml snapshot, peaks, terminal readback.
+7. Failure paths: a fixture that outlives a **3 s demo phase budget** is killed and reaped
+   (`status: incomplete`, `cleanup: unconfirmed`, `timedOut: true`). The shipped 80 s budget is
+   still only covered by the arithmetic check.
+8. yaml snapshot, peaks, terminal readback.
 
 ## Exit codes
 
@@ -35,13 +40,15 @@ One invocation is one round. Output goes to
 | 0 | passed |
 | 70 | envelope or static-contract refusal |
 | 72 | unit tests or fixture observation failed |
+| 74 | the failure paths (network observation or kill path) did not behave |
 | 73 | an isolation gate refused |
 | 75/76/77 | run dir / lock acquisition / lock held (launcher) |
 
 ## Artifacts
 
-`summary.txt`, `isolation.txt`, `fixture.json`, `tests.tap`, `hashes-before.txt`,
-`hashes-after.txt`, `terminal.txt`, `peaks.txt`, and per-gate files under `isolation/`.
+`summary.txt`, `isolation.txt`, `fixture.json`, `failure-paths.json`, `tests.tap`,
+`hashes-before.txt`, `hashes-after.txt`, `terminal.txt`, `peaks.txt`, per-gate files under
+`isolation/`, and the raw failure-path artifacts under `failure-paths/`.
 
 ## Not established
 

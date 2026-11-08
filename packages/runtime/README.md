@@ -17,7 +17,11 @@ never enters their envelopes.
    entry's module inside the sandbox — disclosed as `FAILURE_PHASE_READ_BY_REIMPORT`.
 4. Writes a receipt (`src/trusted-extraction-receipt.js`, `src/trusted-extraction-supervisor.js`)
    with `certification: false`, `correlation: 'not-established'`, a fixed `notDerived` list and
-   a fixed nine-code `limitations` list.
+   a fixed ten-code `limitations` list.
+5. Records the network verdict from one outbound attempt made **inside** the sandbox: only an errno
+   in `NETWORK_DENY_CODES` is `denied`; a successful connect is `reachable` and fails the gate.
+6. Kills a target that outlives its phase budget (`SIGKILL`), records `timedOut`, and reports
+   `status: incomplete` with `cleanup: unconfirmed` rather than a truncated green.
 
 ## What it does not do
 
@@ -29,8 +33,10 @@ never enters their envelopes.
 ## Tests
 
 ```bash
-node --test --test-concurrency=1 "tests/*.test.js"     # 28 pure tests
+node --test --test-concurrency=1 "tests/*.test.js"     # 29 pure tests
 ```
 
 The bounded observation runs through `scripts/trusted-extraction-batch/`; see
-`docs/testing/2026-11-09-trusted-extraction.md` for the measured rounds.
+`docs/testing/2026-11-09-trusted-extraction.md` for the first measured rounds and
+`docs/testing/2026-11-09-trusted-extraction-failure-paths.md` for the kill path and the observed
+network refusal.

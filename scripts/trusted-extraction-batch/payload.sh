@@ -10,6 +10,7 @@ NODE=/www/server/nodejs/v24.21.0/bin/node
 INSTALLATION=/www/server/nodejs/v24.21.0/lib/node_modules/@deepseek-ai/dsh
 MODULES_ROOT=/www/server/nodejs/v24.21.0/lib/node_modules
 CONFIG=$REPO/examples/trusted-extraction/config.yml
+HANG_CONFIG=$REPO/examples/trusted-extraction/config-hang.yml
 OUT=$1
 fail() { printf '%s\n' "$1" > "$OUT/reason.txt"; exit "$2"; }
 
@@ -31,6 +32,8 @@ bash -n "$REPO/scripts/trusted-extraction-batch/payload.sh" || fail "syntax_payl
 for f in isolation-policy.js child-probe.js trusted-extraction-adapter.js trusted-extraction-receipt.js trusted-extraction-supervisor.js; do
   "$NODE" --check "$PKG/src/$f" || fail "syntax_$f" 70
 done
+"$NODE" --check "$REPO/scripts/trusted-extraction-batch/failure-paths.mjs" || fail "syntax_failure_paths" 70
+"$NODE" --check "$REPO/examples/trusted-extraction/plugin-hang.mjs" || fail "syntax_plugin_hang" 70
 
 # 2. static contract ----------------------------------------------------
 "$NODE" --input-type=module -e "
@@ -110,6 +113,23 @@ process.exit(shape === null && r.receipt.status === 'observed' ? 0 : 1)
 fx=$?
 printf 'fixture_exit=%s\n' "$fx" > "$OUT/fixture-exit.txt"
 [ "$fx" -eq 0 ] || fail "fixture_observation" 72
+
+# 5b. failure paths ------------------------------------------------------
+# Two claims the first round only asserted: the network verdict is observed from
+# inside the sandbox, and the phase budget really kills and reaps a wedged
+# target. The kill is demonstrated with a 3 s demo budget; the shipped 80 s
+# budget remains covered only by the arithmetic check.
+mkdir -p "$OUT/failure-paths"
+"$NODE" "$REPO/scripts/trusted-extraction-batch/failure-paths.mjs" \
+  --installation "$INSTALLATION" --modules-root "$MODULES_ROOT" \
+  --hang-config "$HANG_CONFIG" --out "$OUT/failure-paths" \
+  --sentinel /root/.dsh/profiles/web/package.json \
+  > "$OUT/failure-paths/report.txt" 2>&1
+fp=$?
+printf 'failure_paths_exit=%s\n' "$fp" >> "$OUT/failure-paths/report.txt"
+cp "$OUT/failure-paths/failure-paths.json" "$OUT/failure-paths.json" 2>/dev/null || true
+grep -E '"(networkAttempt|code|attempted)"|"failed"|"network"|"hang"' "$OUT/failure-paths.json" > "$OUT/failure-paths-summary.txt" 2>/dev/null || true
+[ "$fp" -eq 0 ] || fail "failure_paths" 74
 
 # 6. yaml snapshot ------------------------------------------------------
 "$NODE" -e "
