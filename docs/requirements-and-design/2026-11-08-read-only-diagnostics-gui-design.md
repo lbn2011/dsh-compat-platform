@@ -3,7 +3,7 @@
 > Version: v1.0　　Date: 2026-11-08　　Related modules: `projects/dsh-compat-platform/packages/host`, `packages/analyzer`
 >
 > **Confirmed decisions (pre-existing, restated; none newly made here)**:
-> - **The envelope is the contract.** `dsh-compat-diagnose` emits one JSON document whose version string is `dsh-compat-diagnose/0.1-draft.1` (`packages/analyzer/src/diagnose-internal.js:66-77`), and `certification` is literally `false`, `correlation` literally `not-established`. Any view of it must keep those literals visible, not soften them.
+> - **The envelope is the contract.** `dsh-compat-diagnose` emits one JSON document whose version string is `dsh-compat-diagnose/0.2-draft.1` (it was `0.1-draft.1` until 2026-11-09, when the envelope gained the per-source `provenance` projection; the GUI serves whatever version the document carries and only requires the field to be a non-empty string) (`packages/analyzer/src/diagnose-internal.js:66-77`), and `certification` is literally `false`, `correlation` literally `not-established`. Any view of it must keep those literals visible, not soften them.
 > - **No second HTTP server.** Roadmap P3 says "Do not create another HTTP server, Loader, registry or skill manager" (`docs/requirements-and-design/2026-11-04-platform-next-roadmap-dev-plan.md`, P3).
 > - **Production is off limits.** Port 3080 and `/root/.dsh` stay untouched unless separately authorised; the gate requires an *explicitly authorized isolated development GUI* (same roadmap, P3 gate).
 > - **The GUI must not become the analysis.** Historical records reject "dump the config and call it loadability": a view of a report is not evidence of a plugin loading, activating or being compatible.

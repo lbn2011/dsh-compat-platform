@@ -24,7 +24,7 @@ import {
   readOptions,
 } from '../src/index.js'
 
-const DIAGNOSE_VERSION = 'dsh-compat-diagnose/0.1-draft.1'
+const DIAGNOSE_VERSION = 'dsh-compat-diagnose/0.2-draft.1'
 
 function clearEnvelope() {
   return {
@@ -40,6 +40,15 @@ function clearEnvelope() {
       entryDiagnostics: 0,
     },
     combinedReport: null,
+    // One entry per source, in the fixed order. The page shows these, so the
+    // fixture carries the words a one-source envelope really has: the profile lane
+    // was read but its summary holds no baseline, and nothing else was named.
+    provenance: [
+      { source: 'profile-input', baselineState: 'not-reflected', commit: null, node: null },
+      { source: 'static-input', baselineState: 'not-provided', commit: null, node: null },
+      { source: 'runtime-input', baselineState: 'not-provided', commit: null, node: null },
+      { source: 'admission-input', baselineState: 'not-provided', commit: null, node: null },
+    ],
     nextSteps: [{ code: 'CORRELATION_NOT_ESTABLISHED', source: 'report', message: 'one source only' }],
     limitations: ['CORRELATION_NOT_ESTABLISHED'],
   }
@@ -171,6 +180,23 @@ test('the page route serves HTML that states the two literals before any data', 
   assert.match(html, /compatibility, loadability or certification result/)
   // The page must not re-run analysis or embed a second data source.
   assert.doesNotMatch(html, /child_process|spawn|execFile/)
+})
+
+test('the page carries a baseline section and explains every word it may print', async (t) => {
+  const { file } = await envelopeFile(t, clearEnvelope())
+  const carrier = makeCarrier()
+  apply(carrier.ctx, { envelopePath: file })
+
+  const state = await call(carrier.routes.get(DEFAULT_PAGE_PATH), makeRequest())
+  const html = bodyText(state)
+  // Static furniture: the heading and the sentence that stops "not-reflected" from
+  // being read as "this document had no baseline".
+  assert.match(html, /Baseline per source/)
+  assert.match(html, /never means the document had none/)
+  // The two other words a one-source envelope cannot show are explained too, so a
+  // reader who never opens the JSON still learns what each word excludes.
+  assert.match(html, /no document was named for this source/)
+  assert.match(html, /produced no usable result/)
 })
 
 test('both routes refuse methods other than GET and HEAD', async (t) => {

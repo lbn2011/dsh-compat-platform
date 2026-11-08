@@ -276,6 +276,52 @@ synchronous throw, a rejected promise and a callback-reported error all end in `
 > is the same limitation the combined CLI accepts (`combined-cli.js:418-455`), and it is recorded
 > rather than papered over.
 
+### 4.8 Envelope `0.2-draft.1`: the per-source baseline projection (2026-11-09)
+
+**Why the shape moved.** `0.1-draft.1` carried each lane result verbatim and nothing about
+where it came from. A reader could see a runtime receipt that *does* name a commit next to a
+profile summary that never could, with no field saying which is which. Two decisions were taken
+with the user: bump the envelope (D-C) and treat real loadability as a separate, separately
+disclosed slice (D-B). This section records D-C.
+
+**What was added.** One top-level `provenance` array, always four entries, always in the fixed
+source order, each a frozen record `{source, baselineState, commit, node}`:
+
+- `recorded` — the lane summary carries a baseline this envelope copies verbatim (40-character
+  commit, non-empty node). Today only the runtime receipt does, because `runtime-evidence.js`
+  makes `baseline` mandatory.
+- `not-reflected` — the lane was read and summarised, but the summary has no baseline field.
+  `profile` (a dump summary), `static` (an analysis report) and `admission` (whose summary
+  keys are closed to `schemaVersion`/`certification`/`coverage`/`cases`/`limitations`) are
+  always this word when usable.
+- `not-provided` — no document was named.
+- `not-readable` — named, but no usable result, so a baseline it carried is unavailable.
+
+**Why not inside the lane blocks.** `combined-report` is frozen and republished; adding a field
+there would change a shape three other readers already consume. The envelope already adds
+top-level fields of its own (`diagnoseVersion`, `certification`, `correlation`, `nextSteps`,
+`limitations`), so the projection joins those and every lane block stays byte-identical.
+
+**Why no confidence score.** The user asked for "baseline/confidence" information. A baseline
+is read, not estimated, so it is copied. Confidence has no recorded basis anywhere in these
+documents — inventing a number or a word would be the D8 over-claim in a new place. The
+limitation `BASELINE_IS_READ_FROM_THE_SUMMARY_ONLY` is added instead, and it is part of the
+same envelope.
+
+**Why no `unknown` word.** An unreadable baseline is `not-readable`; a fifth word meaning the
+same thing lets a reader treat one of the two as "probably fine".
+
+**Validation.** `diagnoseExitCode` validates the projection for shape — array of exactly four,
+fixed order, closed keys, closed words, strings exactly when `recorded` — and refuses anything
+else with the same fixed `TypeError` as every other malformed envelope. It deliberately does
+not cross-check the projection against the blocks: that would be a second derivation of the
+same fact, and a second thing that can disagree.
+
+**Consumers synced.** `packages/host/src/envelope.js` gained `provenance` to its inspected
+field list and refuses an envelope without it; `packages/host/src/page.js` renders one card per
+entry under "Baseline per source", printing `commit`/`node` only for `recorded` and one muted
+sentence per other word. Host tests pin both.
+
 ## 5. Data sources
 
 1. **【Decided】Profile input**: the dump text exactly as `dsh --profile <name> --dump-config` writes

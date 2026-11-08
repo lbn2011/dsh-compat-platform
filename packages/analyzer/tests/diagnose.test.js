@@ -614,6 +614,21 @@ function stubEnvelope(outcomes) {
           entryDiagnostics: 0,
         };
 
+  // The seam stub stands in for the assembler, so it must carry the projection the
+  // assembler emits; otherwise every seam test would fail on a missing field rather
+  // than on the behaviour it is testing. Words are derived the same way the
+  // assembler derives them: nothing is recorded but a real runtime receipt.
+  const provenance = DIAGNOSE_SOURCES.map((slot) => {
+    const block = slot === "profile" ? profile : (channels[slot] === undefined ? null : channels[slot]);
+    if (block === null || block.state !== "provided") {
+      return { source: SOURCE_BY_NAME[slot], baselineState: "not-provided", commit: null, node: null };
+    }
+    if (block.outcome === "invalid" || block.outcome === "error") {
+      return { source: SOURCE_BY_NAME[slot], baselineState: "not-readable", commit: null, node: null };
+    }
+    return { source: SOURCE_BY_NAME[slot], baselineState: "not-reflected", commit: null, node: null };
+  });
+
   return {
     diagnoseVersion: DIAGNOSE_VERSION,
     certification: false,
@@ -629,6 +644,7 @@ function stubEnvelope(outcomes) {
             channels,
             limitations: [],
           },
+    provenance,
     nextSteps: [],
     limitations: [],
   };
@@ -1154,4 +1170,107 @@ test('a lane whose JSON did not parse never imports its validator', async (t) =>
   assert.equal(report.combinedReport.channels.static.state, 'provided');
   assert.equal(report.combinedReport.channels.static.outcome, 'invalid');
   assert.deepEqual(report.combinedReport.channels.static.issues, [{ code: 'INPUT_JSON_INVALID' }]);
+});
+
+/* ------------------------------------------------------------------ *
+ * Provenance projection (`0.2-draft.1`).
+ * ------------------------------------------------------------------ */
+
+const runtimeReceipt = () => runtimeDocument();
+
+
+test('provenance has one entry per source, in the fixed order, with only closed words', () => {
+  const report = buildDiagnoseReport({ profile: { text: '- id: a\n  name: b\n' } }, {});
+
+  assert.equal(report.provenance.length, DIAGNOSE_SOURCES.length);
+  assert.deepEqual(
+    report.provenance.map((entry) => entry.source),
+    DIAGNOSE_SOURCES.map((source) => SOURCE_BY_NAME[source]),
+  );
+  for (const entry of report.provenance) {
+    assert.deepEqual(Object.keys(entry), ['source', 'baselineState', 'commit', 'node']);
+    assert.equal(entry.commit, null);
+    assert.equal(entry.node, null);
+  }
+  // The profile lane's summary has no baseline field at all: that is
+  // `not-reflected`, never "this document had no baseline".
+  assert.equal(report.provenance[0].baselineState, 'not-reflected');
+  for (const entry of report.provenance.slice(1)) assert.equal(entry.baselineState, 'not-provided');
+});
+
+test('a real runtime receipt is reported as recorded, with its two strings copied', () => {
+  const document = runtimeReceipt();
+  const report = buildDiagnoseReport({ runtime: { document } }, {});
+
+  const entry = report.provenance.find((candidate) => candidate.source === 'runtime-input');
+  assert.equal(entry.baselineState, 'recorded');
+  assert.equal(entry.commit, document.baseline.commit);
+  assert.equal(entry.node, document.baseline.node);
+});
+
+test('a summary that carries no baseline field is not-reflected, and the limitation says so', () => {
+  const report = buildDiagnoseReport(
+    {
+      profile: { text: '- id: a\n  name: b\n' },
+      static: { document: { declarations: [], availableCapabilities: [] } },
+      admission: { document: { schemaVersion: 'admission-evidence/0.1-draft.1' } },
+    },
+    {
+      validateDeclaration: () => ({ valid: true, issues: [] }),
+      // Mirrors the real summariser exactly: the wrapper accepts only this closed
+      // summary shape, and none of its five keys is a baseline. The admission lane
+      // therefore never republishes the document own baseline.
+      validateAdmissionEvidence: () => ({
+        valid: true,
+        issues: [],
+        summary: {
+          schemaVersion: 'admission-evidence/0.1-draft.1',
+          certification: false,
+          coverage: { required: [], present: [], unknown: [] },
+          cases: [],
+          limitations: [],
+        },
+      }),
+    },
+  );
+
+  const words = report.provenance.map((entry) => entry.baselineState);
+  assert.deepEqual(words, ['not-reflected', 'not-reflected', 'not-provided', 'not-reflected']);
+  assert.ok(report.limitations.includes('BASELINE_IS_READ_FROM_THE_SUMMARY_ONLY'));
+});
+
+test('a lane that produced no usable document is not-readable, not not-reflected', () => {
+  const report = buildDiagnoseReport({ admission: { document: { schemaVersion: 'wrong' } } }, {});
+
+  const entry = report.provenance.find((candidate) => candidate.source === 'admission-input');
+  assert.equal(entry.baselineState, 'not-readable');
+  assert.equal(entry.commit, null);
+  assert.equal(entry.node, null);
+});
+
+test('a provenance projection that contradicts the four words is refused', () => {
+  const report = buildDiagnoseReport({ runtime: { document: runtimeReceipt() } }, {});
+  const runtimeIndex = DIAGNOSE_SOURCES.indexOf('runtime');
+
+  const cases = [
+    ['missing field', (copy) => { delete copy.provenance; }],
+    ['not an array', (copy) => { copy.provenance = {}; }],
+    ['too short', (copy) => { copy.provenance = copy.provenance.slice(0, 3); }],
+    ['wrong source label', (copy) => { copy.provenance[0].source = 'profile'; }],
+    ['unknown word', (copy) => { copy.provenance[0].baselineState = 'probably-fine'; }],
+    ['recorded without a commit', (copy) => { copy.provenance[runtimeIndex].commit = null; }],
+    ['recorded with an abbreviation', (copy) => { copy.provenance[runtimeIndex].commit = 'deadbeef'; }],
+    ['recorded without a node', (copy) => { copy.provenance[runtimeIndex].node = ''; }],
+    ['half a baseline', (copy) => { copy.provenance[0].commit = '0'.repeat(40); }],
+    ['an extra key', (copy) => { copy.provenance[0].cache = 'hit'; }],
+  ];
+  for (const [label, damage] of cases) {
+    const copy = structuredClone(report);
+    damage(copy);
+    assert.throws(
+      () => diagnoseExitCode(copy),
+      TypeError,
+      `a projection damaged by "${label}" must not map to an exit code`,
+    );
+  }
 });

@@ -50,6 +50,8 @@ import {
   DIAGNOSE_SOURCES,
   DIAGNOSE_VERSION,
   LANE_NAMES,
+  PROVENANCE_BASELINE_STATES,
+  PROVENANCE_KEYS,
   SOURCE_BY_NAME,
   buildFromPayloads,
 } from './diagnose-internal.js';
@@ -62,6 +64,8 @@ export {
   DIAGNOSE_SOURCES,
   DIAGNOSE_VERSION,
   LANE_NAMES,
+  PROVENANCE_BASELINE_STATES,
+  PROVENANCE_KEYS,
   SOURCE_BY_NAME,
 };
 
@@ -99,6 +103,57 @@ function readBlockShape(block) {
   if (!OUTCOME_VALUES.includes(block.outcome)) throw new TypeError(REPORT_TYPE_ERROR);
   if (block.issues !== undefined && !Array.isArray(block.issues)) throw new TypeError(REPORT_TYPE_ERROR);
   return { state: 'provided', outcome: block.outcome, issues: block.issues ?? [] };
+}
+
+const PROVENANCE_COMMIT_PATTERN = /^[0-9a-f]{40}$/;
+
+/**
+ * Validate the provenance projection.
+ *
+ * WHY THIS IS CHECKED AT ALL. The projection exists to stop a reader from
+ * assuming a baseline exists. An envelope that carried a malformed one — a
+ * `recorded` entry with a null commit, an entry for a source that is not in the
+ * fixed order — would be worse than no projection, because it would be quoted as
+ * if it had been read. So the shape is validated here and a violation is the same
+ * fixed `TypeError` as every other malformed envelope.
+ *
+ * WHAT IT DOES NOT CHECK: that the projection agrees with the blocks. A mapper
+ * that cross-checked `not-provided` against `state === 'absent'` would be reading
+ * the whole envelope twice and inventing a second source of truth; the two checks
+ * live side by side instead, and a hand-built envelope that disagrees with itself
+ * is out of scope here (it is a document nobody produced).
+ */
+function readProvenance(report) {
+  const entries = report.provenance;
+  if (!Array.isArray(entries)) throw new TypeError(REPORT_TYPE_ERROR);
+  if (entries.length !== DIAGNOSE_SOURCES.length) throw new TypeError(REPORT_TYPE_ERROR);
+
+  const states = PROVENANCE_BASELINE_STATES;
+  const legalStates = Object.freeze(Object.values(states));
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (!isPlainRecord(entry)) throw new TypeError(REPORT_TYPE_ERROR);
+
+    const keys = Object.keys(entry).sort();
+    if (keys.length !== PROVENANCE_KEYS.length) throw new TypeError(REPORT_TYPE_ERROR);
+    if (keys.join(',') !== [...PROVENANCE_KEYS].sort().join(',')) throw new TypeError(REPORT_TYPE_ERROR);
+
+    if (entry.source !== SOURCE_BY_NAME[DIAGNOSE_SOURCES[index]]) throw new TypeError(REPORT_TYPE_ERROR);
+    if (!legalStates.includes(entry.baselineState)) throw new TypeError(REPORT_TYPE_ERROR);
+
+    if (entry.baselineState === states.RECORDED) {
+      if (typeof entry.commit !== 'string' || !PROVENANCE_COMMIT_PATTERN.test(entry.commit)) {
+        throw new TypeError(REPORT_TYPE_ERROR);
+      }
+      if (typeof entry.node !== 'string' || entry.node === '') throw new TypeError(REPORT_TYPE_ERROR);
+    } else if (entry.commit !== null || entry.node !== null) {
+      // Every other word says "no baseline here", so carrying half of one is a
+      // contradiction, not extra information.
+      throw new TypeError(REPORT_TYPE_ERROR);
+    }
+  }
+  return entries;
 }
 
 /**
@@ -177,6 +232,7 @@ export function diagnoseExitCode(report) {
   }
 
   const blocks = DIAGNOSE_SOURCES.map((source) => ({ source, block: readChannel(report, source) }));
+  readProvenance(report);
 
   let validatorLoadFailed = false;
   for (const { block } of blocks) {

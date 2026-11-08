@@ -929,12 +929,18 @@ result, and when every named lane fails the embedded combined report still carri
 
 ```json
 {
-  "diagnoseVersion": "dsh-compat-diagnose/0.1-draft.1",
+  "diagnoseVersion": "dsh-compat-diagnose/0.2-draft.1",
   "certification": false,
   "correlation": "not-established",
   "profile": { "state": "provided", "source": "profile-input", "outcome": "clear",
                "issues": [], "summary": { "documents": 1, "...": "..." }, "entryDiagnostics": 0 },
   "combinedReport": { "reportVersion": "combined-report/0.1-draft.1", "channels": { "...": "..." } },
+  "provenance": [
+    { "source": "profile-input", "baselineState": "not-reflected", "commit": null, "node": null },
+    { "source": "static-input", "baselineState": "not-provided", "commit": null, "node": null },
+    { "source": "runtime-input", "baselineState": "recorded", "commit": "0000000000000000000000000000000000000000", "node": "v24.21.0" },
+    { "source": "admission-input", "baselineState": "not-provided", "commit": null, "node": null }
+  ],
   "nextSteps": [ { "code": "RUNTIME_ATTENTION", "source": "runtime", "message": "..." } ],
   "limitations": ["...", "PROFILE_BLOCK_IS_A_SUMMARY_NOT_A_DUMP", "NO_CROSS_SOURCE_IDENTITY"]
 }
@@ -955,6 +961,23 @@ result, and when every named lane fails the embedded combined report still carri
 - `nextSteps` carries at most one fixed-code, fixed-text step per source — read-only advice that
   names the recorded cause. A source nobody named gets `SOURCE_NOT_PROVIDED`, which never moves
   the exit code.
+- `provenance` is one entry per source, always four, always in the fixed source order
+  (`source`, `baselineState`, `commit`, `node`). It reports **what this envelope could read
+  about a baseline**, and nothing else: no entry is compared with another, no commit is checked
+  against a checkout, and no entry is filled in from a neighbour.
+
+  | `baselineState` | Meaning |
+  | --- | --- |
+  | `recorded` | The lane's own summary carries a baseline this envelope can copy verbatim: a 40-character commit and a non-empty node version. Today only the runtime receipt does. |
+  | `not-reflected` | The lane was read and summarised, but its summary carries no baseline field at all. `profile`, `static` and `admission` are always this word when usable. It points upstream; it never says the document had no baseline. |
+  | `not-provided` | No document was named for that source. |
+  | `not-readable` | The document was named but produced no usable result, so any baseline it carried is unavailable. |
+
+  `commit` and `node` are non-null **exactly** when the word is `recorded`; every other word
+  carries two nulls. There is deliberately no `unknown` word — an unreadable baseline is
+  `not-readable`, and a fifth word meaning the same thing invites a reader to treat one of the
+  two as "probably fine". The envelope also adds the limitation
+  `BASELINE_IS_READ_FROM_THE_SUMMARY_ONLY`, so the projection cannot be quoted without it.
 
 ### 13.3 Exit codes (closed table)
 
@@ -1020,8 +1043,12 @@ one place, because the assembler accepts only its own option keys.
 
 `diagnoseExitCode` re-checks the envelope rather than trusting it: the documented
 `diagnoseVersion`, `certification` and `correlation`, an array `nextSteps`, the presence of
-`profile`, and — when `combinedReport` is not `null` — a plain `channels` object carrying all
-three lanes as **own** properties. A missing or `null` channel throws; it is never filled in as
+`profile`, a `provenance` array of exactly four entries in the fixed source order with closed
+keys and closed words (`recorded` carrying a 40-character commit and a non-empty node; every
+other word carrying two nulls), and — when `combinedReport` is not `null` — a plain `channels`
+object carrying all three lanes as **own** properties. The projection is validated for shape
+only: it is deliberately not cross-checked against the blocks, because a second derivation of
+the same fact is a second thing that can disagree. A missing or `null` channel throws; it is never filled in as
 `absent`, because a truncated report must not read as "nobody asked". Only
 `combinedReport === null` makes the three lanes absent, and an `absent` block must carry exactly
 `outcome: 'unknown'`. A shape violation is a fixed `TypeError` surfaced by the CLI as `5`; there
@@ -1029,6 +1056,18 @@ is no separate "bad report" exit code. It is a shape check, not a provenance or 
 
 ### 13.7 Verification status
 
+- **`0.2-draft.1` (the `provenance` projection), executed 2026-11-09 in three bounded rounds,
+  all green.** `tests/diagnose.test.js` is **54/54** in its own transient `systemd-run` unit
+  (384 MiB, swap 0, 32 tasks, 50% CPU, 120 s ceiling), with `memory_peak=42127360` B,
+  `pids_peak=16`, `mem_available_kib=1250024` and a settled unit (`MainPID=0`). The
+  real-validator wiring runner stayed green over the same bump: six CLI cases
+  (`0/0/2/1/2/2`, `case_failures=none`) plus its own suite `6/6`. The host GUI runner served the
+  bumped envelope over HTTP (`200` page, `200` verbatim JSON, `405`, `403`, `404`, and the
+  `503 ENVELOPE_UNREADABLE` path) with `16/16` package tests. Numbers, hashes and the five
+  deviations are in [the record](../../docs/testing/2026-11-09-diagnose-provenance.md).
+  **These are three runners, not the full package suite, and no host ran.**
+  The bump is shape-only: **no exit code changed.**
+- **`0.1-draft.1` (the shape before the projection), executed 2026-11-08 in two bounded rounds.**
 - **Executed in two separately authorized bounded rounds.** Each run of `tests/diagnose.test.js`
   used its own transient `systemd-run` unit (384 MiB, swap 0, 32 tasks, 50% CPU, 120 s ceiling),
   with effective limits checked through cgroup and systemd readbacks before the workload:

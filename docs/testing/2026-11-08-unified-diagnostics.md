@@ -1,5 +1,10 @@
 # 2026-11-08 — unified diagnostics: two bounded runs of `tests/diagnose.test.js`
 
+> **Later shape change (2026-11-09).** The envelope version is now
+> `dsh-compat-diagnose/0.2-draft.1` and it carries a top-level `provenance` array. The `49/49`
+> below describes the `0.1-draft.1` bytes and is neither retracted nor additive; the current
+> numbers are in [2026-11-09-diagnose-provenance.md](2026-11-09-diagnose-provenance.md).
+
 This record documents **two** executions of the `diagnose-batch` acceptance batch against the
 `dsh-compat-diagnose` slice: a first run that ended with eight failing cases, and a re-run after
 **test-side-only** corrections that ended green. Both runs are recorded, including the failing

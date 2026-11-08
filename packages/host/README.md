@@ -62,6 +62,9 @@ for no reachable reason.
 - closed refusal vocabulary — `ENVELOPE_MISSING`, `ENVELOPE_UNREADABLE`,
   `ENVELOPE_TOO_LARGE`, `ENVELOPE_NOT_JSON`, `ENVELOPE_SHAPE` — so no filesystem
   detail leaks into a response;
+- `provenance` must be an array: the envelope's per-source baseline projection is the
+  field that stops a reader assuming every source names a commit, so a page that
+  dropped it would be worse than one that never showed it;
 - explicit field checks name the field that failed, and a final
   `diagnoseExitCode(report)` call guarantees the document served is one the
   analyzer's own exit mapper accepts. A throw there is reported as
@@ -78,7 +81,7 @@ absolute origin, touches no process API, and prints `certification: false` and
 node --test --test-concurrency=1 "tests/*.test.js"
 ```
 
-15 tests, no dependencies: a fake carrier records the two registrations, and the
+16 tests, no dependencies: a fake carrier records the two registrations, and the
 real handlers run against real files written into `mkdtemp`. They do **not** boot
 the carrier, listen on a socket, or render the page in a browser — that is the
 batch's job and the record's non-claim.

@@ -1,5 +1,10 @@
 # Read-only diagnostics GUI — bounded execution record (2026-11-08)
 
+> **Later shape change (2026-11-09).** The envelope the GUI serves is now
+> `dsh-compat-diagnose/0.2-draft.1` and the page renders its `provenance` array under "Baseline
+> per source"; the host suite grew from 15 to 16 tests. The `15/15` below describes the earlier
+> bytes and is not additive. Current numbers: [2026-11-09-diagnose-provenance.md](2026-11-09-diagnose-provenance.md).
+
 Status: **EXECUTED**. Two bounded rounds under the acceptance envelope; the second
 is green. Round 1 is recorded in full, including the three defects it exposed and
 the fix for each.

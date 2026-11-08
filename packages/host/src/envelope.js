@@ -46,6 +46,7 @@ export const ENVELOPE_FIELDS = Object.freeze([
   'correlation',
   'profile',
   'combinedReport',
+  'provenance',
   'nextSteps',
 ])
 
@@ -77,6 +78,9 @@ export function checkEnvelopeShape(report) {
   if (report.combinedReport !== null && !isPlainRecord(report.combinedReport)) {
     return { field: 'combinedReport' }
   }
+  // The projection is what stops a reader assuming a baseline exists, so a page
+  // that dropped it would be worse than one that never showed it.
+  if (!Array.isArray(report.provenance)) return { field: 'provenance' }
   if (!Array.isArray(report.nextSteps)) return { field: 'nextSteps' }
   return null
 }

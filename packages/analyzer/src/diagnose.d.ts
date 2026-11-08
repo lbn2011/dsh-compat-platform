@@ -14,7 +14,7 @@ import type { CombinedReport } from './combined-report.js';
 import type { ProfileDumpSummary } from './profile-dump.js';
 
 /** The envelope format version this module emits. */
-export declare const DIAGNOSE_VERSION: 'dsh-compat-diagnose/0.1-draft.1';
+export declare const DIAGNOSE_VERSION: 'dsh-compat-diagnose/0.2-draft.1';
 
 /** Every source, in the fixed order used by this envelope. */
 export declare const DIAGNOSE_SOURCES: readonly ['profile', 'static', 'runtime', 'admission'];
@@ -56,7 +56,50 @@ export type DiagnoseEntryFailure = (typeof DIAGNOSE_ENTRY_FAILURES)[keyof typeof
 export declare const DIAGNOSE_LIMITATION_CODES: readonly [
   'PROFILE_BLOCK_IS_A_SUMMARY_NOT_A_DUMP',
   'NO_CROSS_SOURCE_IDENTITY',
+  'BASELINE_IS_READ_FROM_THE_SUMMARY_ONLY',
 ];
+
+/**
+ * The closed baseline vocabulary of the provenance projection.
+ *
+ * `recorded` — the lane summary carries a baseline this envelope copies verbatim.
+ * `not-reflected` — the lane was summarised, but that summary has no baseline field.
+ * `not-provided` — no document was named.
+ * `not-readable` — named, but no usable result, so a baseline it carried is unavailable.
+ *
+ * There is no `unknown` word: an unreadable baseline is `not-readable`, and a fifth word
+ * meaning the same thing invites a reader to treat one of the two as "probably fine".
+ */
+export declare const PROVENANCE_BASELINE_STATES: Readonly<{
+  RECORDED: 'recorded';
+  NOT_REFLECTED: 'not-reflected';
+  NOT_PROVIDED: 'not-provided';
+  NOT_READABLE: 'not-readable';
+}>;
+
+/** The fixed key order of one provenance entry. */
+export declare const PROVENANCE_KEYS: readonly ['source', 'baselineState', 'commit', 'node'];
+
+/** The closed baseline word set. */
+export type ProvenanceBaselineState =
+  | 'recorded'
+  | 'not-reflected'
+  | 'not-provided'
+  | 'not-readable';
+
+/**
+ * What the envelope could read about one source own baseline.
+ *
+ * `commit` and `node` are non-null exactly when `baselineState` is `recorded`; every
+ * other word carries two nulls, because half a baseline is a contradiction rather than
+ * extra information. `source` is the fixed slot label, never a path.
+ */
+export interface DiagnoseProvenanceEntry {
+  readonly source: string;
+  readonly baselineState: ProvenanceBaselineState;
+  readonly commit: string | null;
+  readonly node: string | null;
+}
 
 /** The closed next-step vocabulary. */
 export declare const DIAGNOSE_NEXT_STEP_CODES: readonly [
@@ -126,7 +169,7 @@ export interface DiagnoseNextStep {
 }
 
 export interface DiagnoseReport {
-  readonly diagnoseVersion: 'dsh-compat-diagnose/0.1-draft.1';
+  readonly diagnoseVersion: 'dsh-compat-diagnose/0.2-draft.1';
   readonly certification: false;
   readonly correlation: 'not-established';
   readonly profile: DiagnoseProfileBlock;
@@ -145,6 +188,15 @@ export interface DiagnoseReport {
    * `null` **only** when no lane was named at all.
    */
   readonly combinedReport: CombinedReport | null;
+  /**
+   * One entry per source, always four, always in `DIAGNOSE_SOURCES` order.
+   *
+   * It reports what this envelope could read about a baseline and nothing else: no entry is
+   * compared with another, no commit is checked against a checkout, and no entry is filled in
+   * from a neighbour. A reader who wants an answer to "were these two sources the same tree"
+   * has no field here, by design.
+   */
+  readonly provenance: readonly DiagnoseProvenanceEntry[];
   /** At most one step per source, in `DIAGNOSE_SOURCES` order. */
   readonly nextSteps: readonly DiagnoseNextStep[];
   /** The combined report's fixed list, followed by this envelope's two codes. */
@@ -209,7 +261,8 @@ export declare function buildDiagnoseReport(
  * never returned here — the CLI adds it for serialization and output failures.
  *
  * The envelope is re-checked here rather than assumed: `diagnoseVersion`,
- * `certification`, `correlation`, `nextSteps` and the presence of `profile` must all
+ * `certification`, `correlation`, `nextSteps`, the four-entry `provenance` projection and
+ * the presence of `profile` must all
  * be the documented ones. When `combinedReport` is not `null`, `channels` must be a
  * plain object holding all three lane blocks as own properties — a missing or `null`
  * channel is an error, never a silent `absent`. Only `combinedReport === null`

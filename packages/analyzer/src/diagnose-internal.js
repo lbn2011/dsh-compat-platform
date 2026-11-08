@@ -43,7 +43,7 @@ import {
 import { summarizeProfileDumpText } from './profile-dump.js';
 
 /** The envelope format this module emits. */
-export const DIAGNOSE_VERSION = 'dsh-compat-diagnose/0.1-draft.1';
+export const DIAGNOSE_VERSION = 'dsh-compat-diagnose/0.2-draft.1';
 
 /** Every source, in the fixed order used everywhere in this module. */
 export const DIAGNOSE_SOURCES = Object.freeze(['profile', 'static', 'runtime', 'admission']);
@@ -98,6 +98,7 @@ export const DIAGNOSE_ENTRY_FAILURES = Object.freeze({
 export const DIAGNOSE_LIMITATION_CODES = Object.freeze([
   'PROFILE_BLOCK_IS_A_SUMMARY_NOT_A_DUMP',
   'NO_CROSS_SOURCE_IDENTITY',
+  'BASELINE_IS_READ_FROM_THE_SUMMARY_ONLY',
 ]);
 
 /**
@@ -489,6 +490,90 @@ function outcomeSuffix(block) {
 }
 
 /**
+ * The closed baseline vocabulary for the provenance projection.
+ *
+ * Four words, and every one of them is reachable from a real document:
+ *
+ * - `recorded` — the lane's own summary carries a baseline this envelope can read
+ *   unchanged: a 40-character commit and a non-empty node version, verbatim.
+ * - `not-reflected` — the lane was read and summarised, but that summary carries no
+ *   baseline field at all. This is the honest word for the three lanes whose
+ *   summaries are counts and diagnostics: it points the reader upstream, and it
+ *   never claims a document had no baseline.
+ * - `not-provided` — no such input was named, so there is nothing to read.
+ * - `not-readable` — the input was named but produced no usable document, so any
+ *   baseline it may have carried is unavailable.
+ *
+ * There is deliberately no `unknown` word: an unreadable baseline is already
+ * `not-readable`, and a fifth word that means the same thing invites a reader to
+ * treat one of the two as "probably fine".
+ */
+export const PROVENANCE_BASELINE_STATES = Object.freeze({
+  RECORDED: 'recorded',
+  NOT_REFLECTED: 'not-reflected',
+  NOT_PROVIDED: 'not-provided',
+  NOT_READABLE: 'not-readable',
+});
+
+/** The fixed key order of one provenance entry. */
+export const PROVENANCE_KEYS = Object.freeze(['source', 'baselineState', 'commit', 'node']);
+
+/** A full git object name. Abbreviations are refused, as they are in the runtime receipt. */
+const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
+
+/**
+ * One provenance entry: what this envelope could, and could not, read about one
+ * source's baseline.
+ *
+ * NOTHING IS DERIVED. The commit and node strings are copied from the lane's own
+ * summary when, and only when, they are present and well formed; otherwise the
+ * entry says which of the three "no baseline here" reasons applies. No source's
+ * baseline is compared with another's, and a missing one is never filled in from a
+ * neighbour.
+ */
+function provenanceEntry(source, block) {
+  const states = PROVENANCE_BASELINE_STATES;
+  const label = SOURCE_BY_NAME[source];
+
+  if (block.state !== 'provided') {
+    return { source: label, baselineState: states.NOT_PROVIDED, commit: null, node: null };
+  }
+  if (block.outcome === 'invalid' || block.outcome === 'error') {
+    return { source: label, baselineState: states.NOT_READABLE, commit: null, node: null };
+  }
+
+  const summary = source === 'profile'
+    ? block.summary
+    : (isPlainRecord(block.result) ? block.result.summary : null);
+  const baseline = isPlainRecord(summary) ? summary.baseline : undefined;
+
+  if (
+    isPlainRecord(baseline)
+    && typeof baseline.commit === 'string'
+    && COMMIT_PATTERN.test(baseline.commit)
+    && typeof baseline.node === 'string'
+    && baseline.node !== ''
+  ) {
+    return { source: label, baselineState: states.RECORDED, commit: baseline.commit, node: baseline.node };
+  }
+  return { source: label, baselineState: states.NOT_REFLECTED, commit: null, node: null };
+}
+
+/**
+ * The provenance projection: one frozen entry per source, in the fixed source
+ * order, always the same length whether or not anything was named.
+ *
+ * It is not a provenance *claim*. It says what this envelope read; it does not say
+ * the read document is authentic, that the commit names this checkout, or that two
+ * sources came from the same tree.
+ */
+function buildProvenance(report) {
+  return Object.freeze(
+    DIAGNOSE_SOURCES.map((source) => Object.freeze(provenanceEntry(source, blockFor(report, source)))),
+  );
+}
+
+/**
  * Assemble the envelope from normalized entries. Shared by both builders.
  *
  * @param {Map<string, {kind: 'payload', value: unknown} | {kind: 'failure', code: string}>} normalized
@@ -504,6 +589,7 @@ function assemble(normalized, options) {
     correlation: 'not-established',
     profile,
     combinedReport,
+    provenance: Object.freeze([]),
     nextSteps: Object.freeze([]),
     limitations: Object.freeze([...LIMITATION_CODES, ...DIAGNOSE_LIMITATION_CODES]),
   });
@@ -513,6 +599,7 @@ function assemble(normalized, options) {
   return Object.freeze({
     ...envelope,
     profile: Object.freeze(profile),
+    provenance: buildProvenance(envelope),
     nextSteps: steps,
   });
 }

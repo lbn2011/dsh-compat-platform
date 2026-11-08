@@ -91,6 +91,12 @@ footer {
 </section>
 
 <section>
+  <h2>Baseline per source</h2>
+  <p class="muted">What this envelope could read about each source own baseline. "not-reflected" means the lane summary carries no baseline field; it never means the document had none.</p>
+  <div id="provenance"><p class="muted">loading…</p></div>
+</section>
+
+<section>
   <h2>Limitations (complete list)</h2>
   <ul id="limitations"><li class="muted">loading…</li></ul>
 </section>
@@ -176,6 +182,33 @@ footer {
     return card;
   }
 
+  // One card per provenance entry: the four words, and the two strings only when
+  // the word is "recorded". This is a separate section from the source cards
+  // because provenance is per *source slot*, not per lane: a profile block and a
+  // static channel may both exist while neither carries a baseline.
+  function provenanceCard(entry) {
+    var card = el('div', 'card');
+    card.appendChild(el('h3', null, String(entry && entry.source ? entry.source : '(unknown source)')));
+    var pairs = [['baseline', entry && entry.baselineState]];
+    if (entry && entry.baselineState === 'recorded') {
+      pairs.push(['commit', entry.commit]);
+      pairs.push(['node', entry.node]);
+    }
+    var dl = el('dl', 'rows');
+    rows(dl, pairs);
+    card.appendChild(dl);
+    if (entry && entry.baselineState === 'not-reflected') {
+      card.appendChild(el('p', 'muted', 'this lane stores its own summary; that summary carries no baseline field'));
+    }
+    if (entry && entry.baselineState === 'not-provided') {
+      card.appendChild(el('p', 'muted', 'no document was named for this source'));
+    }
+    if (entry && entry.baselineState === 'not-readable') {
+      card.appendChild(el('p', 'muted', 'the document was named but produced no usable result'));
+    }
+    return card;
+  }
+
   function render(report) {
     var pairs = [
       ['diagnose version', report.diagnoseVersion],
@@ -198,6 +231,13 @@ footer {
       }
     } else {
       sources.appendChild(el('p', 'muted', 'no combined report in this envelope (no lane documents were named)'));
+    }
+
+    var provenance = document.getElementById('provenance');
+    if (provenance) {
+      provenance.replaceChildren();
+      var entries = Array.isArray(report.provenance) ? report.provenance : [];
+      for (var p = 0; p < entries.length; p += 1) provenance.appendChild(provenanceCard(entries[p]));
     }
 
     var limitations = document.getElementById('limitations');

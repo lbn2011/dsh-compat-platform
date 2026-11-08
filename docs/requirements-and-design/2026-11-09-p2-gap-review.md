@@ -96,6 +96,11 @@ boundary currently forbids.
   `dsh-compat-diagnose/0.2-draft.1` (and update the GUI's closed field list, the exit mapper and the
   runners), or keep `0.1-draft.1` frozen and put the baseline projection in a separate command.
 
+  **Decided 2026-11-09: bump to `0.2-draft.1`.** Implemented as the per-source `provenance`
+  projection (G4/G5); the GUI field list, the exit mapper, the declarations file and the host page
+  were updated with it. Evidence: `docs/testing/2026-11-09-diagnose-provenance.md` (three bounded
+  rounds, all green). D-B stays open and is the next slice.
+
 ## 7. What this review does not claim
 
 It is not a maturity score, a completion percentage or a certification. It restates existing
