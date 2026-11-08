@@ -76,7 +76,11 @@ See the [development and acceptance plan](<../../../../docs/requirements-and-des
 
 - Package root: `projects/dsh-compat-platform/packages/analyzer/` (the directory
   name is repository layout; the package name is `dsh-compat-platform`).
-- Private (`"private": true`), ESM, **zero runtime dependencies**.
+- Private (`"private": true`), ESM. **One runtime dependency**: `yaml`, pinned to `2.9.1`,
+  used only by `dsh-compat-profile-dump`. Everything else in this package runs on Node built-ins.
+  (Earlier revisions of this section said "zero runtime dependencies"; that was true until the
+  profile-dump command was added, and it remains true of the analysis, report and comparison
+  lanes.)
 - Node.js `>= 24.9.0` (declared in `engines`). Verified on `v24.21.0`.
 - No `license` field: no license has been granted for this repository yet.
 
@@ -648,4 +652,165 @@ byte-identical-output claims needs to move for that to become possible.
   safety of a module someone else wrote.
 - `src/admission-diagnostics.js` and its `.d.ts` are unchanged by this lane; the
   admission CLI adds files and export slots only.
+
+---
+
+## 12. Profile dump summary — `dsh-compat-profile-dump`
+
+A read-only reader for the YAML that `dsh --profile <name> --dump-config` writes to stdout. Its
+bounds apply to the **input** (1 MiB, 20000 lines) and to its own walk, not to everything the
+parser may allocate. It answers one narrow question: *does this export parse, how is it shaped,
+and which structural facts deserve a second look?* It is not a loader and not a compatibility
+verdict.
+
+```console
+$ dsh-compat-profile-dump ~/dump.yml        # after npm install; or: node src/profile-dump-cli.js ~/dump.yml
+```
+
+Exactly one explicitly named regular file. No stdin, no globs, no default path. stdout carries
+one JSON document — on success, on refusal, and on usage errors; usage text goes to stderr. The
+one exception is a failure of that stdout write itself: the process then exits `5` with no
+document delivered, because a write that failed cannot be repeated into a working one. This is
+the package's first runtime dependency: `yaml`, pinned to `2.9.1`.
+
+### 12.1 What it reads
+
+The export is **one document containing one sequence**. `groupedDump`
+(`packages/boot/app-boot/src/index.ts:697-725`) prefixes each contiguous run with a
+`# == <origin>` comment line, but comments do not delimit YAML documents, so every group's rows
+become items of a single root sequence. This command reports that flat sequence and does not
+claim which layer a row came from.
+
+An **empty export is empty, not healthy**: with no rows, `groupedDump` returns a single newline
+(`index.ts:724`), which parses as an empty document. Empty input, comment-only input and `[]` are
+all reported as `"inventory": "empty"` and nothing more. `completeness` stays `"unknown"` in every
+outcome, because a dump only reflects what the composing host chose to print.
+
+Whitespace-only or comment-only text composes to **no document at all** (`yaml` returns an empty,
+`empty: true` array carrying the stream's own `errors`/`warnings`). That stream is reported as
+`"inventory": "empty"` **only when it carries no error and no warning**. A stream-level problem on
+that same stream — an unsupported `%YAML` directive, for example — is refused instead: a stream
+error becomes `PARSE_ERROR` (exit `2`), and a stream warning becomes `UNEXPECTED_WARNING` (exit
+`2`). "No rows" and "the stream itself is broken" are therefore kept apart.
+
+### 12.2 Output
+
+```json
+{
+  "profileDumpSummary": "profile-dump-summary/0.1-draft.1",
+  "input": { "bytes": 812, "lines": 23 },
+  "documents": 1,
+  "inventory": "present",
+  "root": "sequence",
+  "counts": {
+    "entries": 2, "entryGroups": 0,
+    "entriesWithId": 2, "entriesWithName": 2, "entriesWithConfig": 2, "entriesDisabled": 0,
+    "jsScalars": 2, "distinctTags": 2, "nodes": 14, "scalars": 11, "maxDepth": 4
+  },
+  "limits": { "maxBytes": 1048576, "maxLines": 20000, "maxDepth": 32,
+              "maxNodes": 20000, "maxEntries": 5000, "maxDiagnostics": 64 },
+  "diagnostics": [ { "ordinal": 2, "code": "JS_EXPRESSION_NOT_EVALUATED", "line": 9, "detail": null } ],
+  "diagnosticsTruncated": false,
+  "completeness": "unknown",
+  "runtimeValidation": "not-performed",
+  "certification": false
+}
+```
+
+**No document content is ever emitted.** No id, name, origin label, `# ==` text, configuration
+key, value, `!!js` expression text, path or parser message appears in any field. `distinctTags`
+is a count, not a list. Diagnostics carry an ordinal (1-based top-level row, or `null`), a 1-based
+line, a code from a closed set, and a `detail` from a closed set of *classes* — `JS_COLLECTION`,
+`CORE_NOT_ALLOWED`, `EXTERNAL` for tags, `UNRESOLVED_TAG` / `OTHER_WARNING` for warnings — never
+the tag itself. A local tag (`!SECRET_TAG`) or a verbatim tag (`!<https://…>`) is operator text
+inside the document, so it is classified, not quoted. Parser messages are never read:
+`YAMLError.message` is assembled together with a source excerpt, so only `code` and `pos` are used.
+
+A refusal returns the same envelope with `"inventory": "none"` and `"counts": null`, so a partial
+walk can never be mistaken for a complete inventory.
+
+### 12.3 What is checked, and what deliberately is not
+
+| Check | Rule | Code | Exit |
+| --- | --- | --- | --- |
+| row is a mapping | required | `ENTRY_NOT_MAPPING` | 2 |
+| `id` / `name` | when present, must be a literal string scalar | `ENTRY_ID_NOT_STRING` / `ENTRY_NAME_NOT_STRING` | 1 |
+| `id` repeated | only non-empty, top-level ids are compared | `DUPLICATE_ID` | 1 |
+| `!!js` scalar anywhere | recorded, never evaluated | `JS_EXPRESSION_NOT_EVALUATED` | 0 |
+| anchor / alias | refused | `ANCHOR_PRESENT` / `ALIAS_PRESENT` | 2 |
+| merge key `<<` | refused (never merged) | `MERGE_KEY` | 2 |
+| unknown or vendor tag | refused against a closed allowlist | `UNSUPPORTED_TAG` | 2 |
+| tag on a mapping key | refused | `TAG_KEY_PRESENT` | 2 |
+| more than one document | refused by document count | `MULTI_DOCUMENT` | 2 |
+
+Only `id` and `name` are type-checked. `config`, `group` and `disabled` are counted, and the
+safety walk still descends through `config` looking for tags, aliases and size — but no entry
+semantics are inferred there, and no claim is made that the remaining metadata fields were
+validated.
+
+An **absent** `id` or `name` is not an error in this version. `EntryGroup.create()` accepts
+`Omit<EntryOptions, 'id'>` and calls `tree.ensureId(options)` (`vendor/loader/src/config/group.ts:20-22`),
+which is evidence about `id` only; it says nothing about when a missing `name` is legal. Because
+that shape was not verified here, a missing `name` is not diagnosed at all — a deliberate gap in
+a deliberately partial check, not an assertion that every row is a valid Loader entry. A `group`
+row's `config` is an `EntryOptions[]`, but nested entries are **not analysed**: they are traversed
+for safety only, and an `id` inside a `config` block is never treated as a plugin id.
+
+### 12.4 Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | parsed; no entry-level diagnostic (a `!!js` scalar alone stays `0`) |
+| `1` | parsed, but at least one entry-level diagnostic |
+| `2` | unusable: read failure, not UTF-8, over limits, parse error (including a bad stream directive on an empty stream), unexpected tag, anchor/alias, merge key, tagged key, multiple documents, wrong root shape |
+| `5` | internal failure, including a failed stdout write |
+| `64` | usage error |
+
+`2` and `1` are different on purpose: "cannot be read at all" must not be confused with "read
+fine, look at row 7".
+
+### 12.5 Limits, and what they do not bound
+
+`maxBytes` (1048576) and `maxLines` (20000) act **before** parsing. `maxDepth` (32),
+`maxNodes` (20000), `maxEntries` (5000) and `maxDiagnostics` (64) act **after** parsing, during
+the walk — they bound what this command will *describe*, not what the parser will consume.
+`yaml@2.9.1` has no parse-time depth option. Its `RESOURCE_EXHAUSTION` recovery wraps the compose
+recursion only (`src/compose/compose-node.ts`); a `RangeError` that escapes is caught and reported
+as `RESOURCE_EXHAUSTION_UNCAUGHT`. These are recovery paths, **not guarantees** that the process
+cannot fail, and they say nothing about other consumers of the same library.
+
+`maxDiagnostics` caps the list, not the count: `diagnosticsTruncated` marks the cap, and the exit
+code is decided by a separate counter that keeps counting past it. A refused document never
+returns a partial walk as if it were complete (`counts` is `null`, `inventory` is `"none"`).
+
+### 12.6 What this command does **not** establish
+
+- that any listed plugin would load, or that its dependencies resolve;
+- that a `config` block conforms to its plugin's schema — `config` is not validated against any
+  plugin schema (its tags, aliases and size are still examined by the safety walk);
+- what any `!!js` expression evaluates to — it is never evaluated and never emitted;
+- that the dump is complete, authoritative, or produced by a particular host version;
+- anything about provenance, authentication or certification;
+- that a clean summary means the profile is healthy. `completeness` is always `"unknown"`.
+
+### 12.7 Verification status
+
+- **The authorized second isolated run under Node 24 passed: this lane's single test file
+  `tests/profile-dump.test.js` passes `65/65`, `0` fail.** That is **one file**, not the whole
+  suite, and it is not host integration, cross-version or packaging certification. `yaml@2.9.1`
+  ran under Node 24 for this file only. The record is
+  [`docs/testing/2026-11-08-profile-dump.md`](../../docs/testing/2026-11-08-profile-dump.md).
+- **Earlier record preserved:** the first bounded run of the same file was `65` cases with `1`
+  failure — a `!!python/object:...` case expected `EXTERNAL`, but `!!` expands to the
+  `tag:yaml.org,2002:` namespace and is classified `CORE_NOT_ALLOWED`. The fix was to the test
+  assertion and its description only; the implementation was **not** changed to suit the test.
+  Both records stand; neither is retracted.
+- **Boundaries still pending:** ingestion of a real host's `dsh --dump-config` export, hostile-host
+  behavior, cross-Node-version behavior, and host compatibility. Non-UTF-8 and over-limit files
+  were tested through the CLI's imported `main`; only the valid-file case also exercised a real
+  CLI subprocess. Stream failure tests cover the specific fake sinks and Node Writable case in
+  this file, not every possible stream implementation. Any future execution on this machine
+  must use a separately reviewed resource envelope; the recorded batch is not authorization
+  for an unbounded rerun.
+
 

@@ -13,7 +13,8 @@
     "dsh-compat-analyze": "./src/cli.js",
     "dsh-compat-admission": "./src/admission-cli.js",
     "dsh-compat-report": "./src/combined-cli.js",
-    "dsh-compat-compare": "./src/compare-cli.js"
+    "dsh-compat-compare": "./src/compare-cli.js",
+    "dsh-compat-profile-dump": "./src/profile-dump-cli.js"
   },
   "exports": {
     ".": {
@@ -35,6 +36,11 @@
       "default": "./src/snapshot-diff.js"
     },
     "./compare-cli": "./src/compare-cli.js",
+    "./profile-dump": {
+      "types": "./src/profile-dump.d.ts",
+      "default": "./src/profile-dump.js"
+    },
+    "./profile-dump-cli": "./src/profile-dump-cli.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -44,5 +50,7 @@
   "scripts": {
     "test": "node --test --test-concurrency=1 \"tests/*.test.js\" \"tests/*.test.mjs\""
   },
-  "dependencies": {}
+  "dependencies": {
+    "yaml": "2.9.1"
+  }
 }
