@@ -1,0 +1,9 @@
+# Synthetic fixture profile: three entries, no real plugin, no network, no config
+# values. `id` labels are fixture-local and are the only names that may appear in
+# a public projection.
+- id: ok
+  name: ./plugin-ok.mjs
+- id: import-throw
+  name: ./plugin-import-throw.mjs
+- id: activate-throw
+  name: ./plugin-activate-throw.mjs

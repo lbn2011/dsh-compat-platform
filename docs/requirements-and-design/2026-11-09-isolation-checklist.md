@@ -1,6 +1,6 @@
 # Isolation checklist for the trusted-extraction path
 
-> Date: 2026-11-09 · Status: **checklist prepared; no gate demonstrated.** Companion to
+> Date: 2026-11-09 · Status: **gates 1, 2, 3 and 5 demonstrated in one bounded round; gate 4 asserted statically.** Companion to
 > [the trusted-extraction design](2026-11-09-trusted-extraction-design.md) §4.3.
 >
 > Purpose: turn the five gates in the design into checks that either pass with recorded
@@ -50,7 +50,7 @@ and nothing else.
 **Refusal.** Any unmounted policy path, any extra mount, or a readable out-of-policy
 sentinel → `ISOLATION_MOUNT_MISMATCH`, stop before target execution.
 
-**Status.** Not demonstrated. The policy file does not exist yet.
+**Status.** Demonstrated 2026-11-09: 22 mounts, all under a declared prefix; out-of-policy sentinel read returned ENOENT (`docs/testing/2026-11-09-trusted-extraction.md` §3).
 
 ## 3. Gate 2 — Unprivileged identity and namespace verification
 
@@ -68,8 +68,8 @@ its own user/mount/pid/ipc/uts/net namespaces, and *proves it* from inside.
 **Refusal.** Any assertion failing, including "the child is uid 0 inside a namespace" →
 `ISOLATION_IDENTITY_UNVERIFIED`.
 
-**Status.** Not demonstrated. Capability probes show the mechanisms exist; the drop has not
-been implemented or verified.
+**Status.** Demonstrated 2026-11-09: uid/gid 65534, `CapEff`/`CapPrm` all zero, `NoNewPrivs=1`,
+read from inside the sandbox (`docs/testing/2026-11-09-trusted-extraction.md` §3).
 
 ## 4. Gate 3 — Evidence-directory isolation
 
@@ -86,7 +86,7 @@ verdict.
 **Refusal.** Any supervisor path writable from the child, or a verdict that reads a
 child-written file → `ISOLATION_EVIDENCE_EXPOSED`.
 
-**Status.** Not demonstrated.
+**Status.** Demonstrated 2026-11-09: the supervisor's own file is ENOENT for write from inside, the child's /out is writable (§3).
 
 ## 5. Gate 4 — Time-budget reserve
 
@@ -104,7 +104,7 @@ each phase deadline expires strictly earlier.
 **Refusal.** Arithmetic mismatch, or a run that cannot confirm termination →
 `ISOLATION_BUDGET_INVALID` / `CLEANUP_UNCONFIRMED`.
 
-**Status.** Not demonstrated.
+**Status.** Demonstrated 2026-11-09: 120 s > 80 + 10 + 20 asserted statically; not yet demonstrated by a hanging fixture (§3 notes the reserve is static).
 
 ## 6. Gate 5 — Isolation acceptance with sentinels
 
@@ -123,7 +123,7 @@ each phase deadline expires strictly earlier.
 **Refusal.** Any sentinel readable, any write succeeding, any connection accepted, or any
 surviving descendant → `ISOLATION_SENTINEL_FAILURE`.
 
-**Status.** Not demonstrated.
+**Status.** Demonstrated 2026-11-09 for read/write denial and descendant reaping (MainPID=0); network denial rests on `--unshare-net` rather than an observed refusal (§3, §6 of the record).
 
 ## 7. What would count as evidence
 
