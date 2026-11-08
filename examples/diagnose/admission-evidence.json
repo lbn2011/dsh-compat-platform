@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "admission-evidence/0.1-draft.1",
+  "baseline": {
+    "commit": "not-recorded",
+    "node": "v24.21.0"
+  },
+  "coordination": {
+    "coordinatorIdentity": "not-compared",
+    "provisioning": "not-determined",
+    "scopeVisibility": "not-determined"
+  },
+  "cases": [
+    {
+      "id": "admission-admitted",
+      "status": "passed",
+      "assertions": [
+        { "id": "reservation-precedes-activation", "passed": true },
+        { "id": "activation-ran-once", "passed": true },
+        { "id": "caller-effect-observed-once", "passed": true },
+        { "id": "close-fulfilled", "passed": true },
+        { "id": "close-returns-same-promise", "passed": true },
+        { "id": "claim-released-after-close", "passed": true },
+        { "id": "disposer-ran-exactly-once", "passed": true }
+      ],
+      "limitations": []
+    },
+    {
+      "id": "admission-refused-conflict",
+      "status": "refused",
+      "assertions": [
+        { "id": "refusal-code-conflict", "passed": true },
+        { "id": "refusal-before-any-callback", "passed": true },
+        { "id": "contender-activation-ran-zero", "passed": true },
+        { "id": "contender-effect-ran-zero", "passed": true },
+        { "id": "holder-claim-still-held", "passed": true }
+      ],
+      "limitations": []
+    },
+    {
+      "id": "admission-activation-throw",
+      "status": "passed",
+      "assertions": [
+        { "id": "activation-entered-then-threw", "passed": true },
+        { "id": "registered-rollback-callbacks-settled", "passed": true },
+        { "id": "rethrow-same-error-identity", "passed": true },
+        { "id": "rollback-disposer-ran-exactly-once", "passed": true },
+        { "id": "claim-quarantined-after-throw", "passed": true }
+      ],
+      "limitations": []
+    },
+    {
+      "id": "admission-cleanup-failure",
+      "status": "passed",
+      "assertions": [
+        { "id": "close-rejected", "passed": true },
+        { "id": "close-rejection-code-cleanup-failed", "passed": true },
+        { "id": "disposer-ran-exactly-once", "passed": true },
+        { "id": "claim-not-released-after-failed-cleanup", "passed": true },
+        { "id": "later-reservation-conflicts", "passed": true }
+      ],
+      "limitations": []
+    }
+  ],
+  "limitations": [
+    "synthetic example; not produced by a real host run"
+  ]
+}

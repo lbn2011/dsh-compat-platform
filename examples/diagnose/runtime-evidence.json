@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "coexistence-evidence/0.1",
+  "baseline": {
+    "commit": "0000000000000000000000000000000000000000",
+    "node": "v24.21.0"
+  },
+  "cases": [
+    {
+      "id": "same-name-conflict",
+      "status": "passed",
+      "evidenceTier": "real-host",
+      "assertions": [
+        { "id": "conflict-observed", "passed": true }
+      ],
+      "limitations": []
+    },
+    {
+      "id": "dependency-unload",
+      "status": "passed",
+      "evidenceTier": "real-host",
+      "assertions": [
+        { "id": "unload-observed", "passed": true }
+      ],
+      "limitations": []
+    },
+    {
+      "id": "stale-cleanup",
+      "status": "passed",
+      "evidenceTier": "real-host",
+      "assertions": [
+        { "id": "cleanup-observed", "passed": true }
+      ],
+      "limitations": []
+    }
+  ],
+  "limitations": [
+    "synthetic example; not produced by a real host run"
+  ]
+}

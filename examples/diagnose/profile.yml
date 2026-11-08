@@ -1,0 +1,14 @@
+# == base
+- id: example.plugin-alpha
+  name: Example Alpha
+  group: demo
+  disabled: false
+  config:
+    greeting: hello
+# == plugins
+- id: example.plugin-beta
+  name: Example Beta
+  group: demo
+  disabled: true
+  config:
+    retries: 2

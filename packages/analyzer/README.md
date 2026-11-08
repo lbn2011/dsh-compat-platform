@@ -844,7 +844,7 @@ node src/diagnose-cli.js --profile dump.yml
 | flag | input | who decides |
 | --- | --- | --- |
 | `--profile` | one exported profile dump (YAML text) | `summarizeProfileDumpText` (§12) |
-| `--static` + `--declaration-validator` | one parsed JSON document | `buildCombinedReport` + the named validator |
+| `--static` + `--declaration-validator` | one analyzer input document — a JSON object `{ declarations, availableCapabilities }`, not a bare declaration | `buildCombinedReport` + the named validator |
 | `--runtime` | one parsed JSON document | `summarizeRuntimeEvidence` |
 | `--admission` + `--admission-validator` | one parsed JSON document | `buildCombinedReport` + the named validator |
 
@@ -992,3 +992,31 @@ is no separate "bad report" exit code. It is a shape check, not a provenance or 
   protocol validator as the injected dependency, and any host-scale dump. Nothing in this section
   is authorization for an unbounded run, and the recorded two-round batch is not authorization
   for a different envelope.
+
+### 13.8 Real-validator wiring example (executed, 6/6 green)
+
+The 49/49 above loads a **synthetic** validator. A separate example connects this CLI to the
+**real** validators in the sibling `dsh-compat-spec` checkout, named by file path
+(`src/index.js` → `validateDeclaration`, `src/admission-evidence.js` → `validateAdmissionEvidence`;
+there is no `admission-evidence` package subpath to import):
+
+- **Runnable example** — [`examples/diagnose/`](../../examples/diagnose/README.md): a synthetic
+  `profile.yml`, `runtime-evidence.json`, `admission-evidence.json`, and the copy-paste commands
+  with each command's expected exit code. The fixtures are referenced in place, so a sibling
+  checkout is required. Nothing there is a host run.
+- **Wiring tests** — [`tests/diagnose-spec-wiring.test.js`](tests/diagnose-spec-wiring.test.js):
+  `main(argv, io)` against the real validators and real temp files. If the sibling checkout is
+  absent the suite fails, it does not skip.
+- **Runner** — [`scripts/diagnose-real-wiring/`](../../scripts/diagnose-real-wiring/README.md):
+  the same envelope as `diagnose-batch`, but the CLI as a real child process, one case per
+  invocation — six cases, `0/0/2/1/2/2`, plus one bounded `node --test` run of the wiring file
+  (`6/6`). Includes one case that shows `--static` refusing a bare declaration (it takes the
+  analyzer input envelope) and one that shows a valid admission document landing on `attention`
+  rather than `clear`.
+- **Record** — [`docs/testing/2026-11-08-diagnose-spec-wiring.md`](../../docs/testing/2026-11-08-diagnose-spec-wiring.md).
+
+> **Executed once per round, three bounded rounds total; round 3 green.** The measured result is
+> that the real validators accept `fixtures/clean.json` and `examples/diagnose/admission-evidence.json`
+> and refuse `fixtures/invalid-declaration.json` and `fixtures/clean.json`-as-admission, with the six
+> CLI cases at `0/0/2/1/2/2` and the wiring file at `6/6` TAP. That is all it is: no host ran, no
+> plugin loaded, `certification` stays `false`, and this is not the full package suite.

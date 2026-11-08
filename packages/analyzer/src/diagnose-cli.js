@@ -126,7 +126,9 @@ Usage:
 
 Input (at least one; each may be given at most once):
   --profile <file>      One exported profile dump, summarized — never echoed.
-  --static <file>       One declaration document (JSON).
+  --static <file>       One analyzer input document (JSON): {"declarations": [...],
+                        "availableCapabilities": [...]}. A single bare declaration
+                        is not this shape and fails the static lane.
   --runtime <file>      One runtime-evidence document (JSON).
   --admission <file>    One admission-evidence document (JSON).
                         No positional argument, no "-", no directory scan.
