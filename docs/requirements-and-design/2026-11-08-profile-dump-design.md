@@ -382,7 +382,7 @@ Explicit **non**-checks, stated because silence otherwise reads as approval:
 | `counts.nodes` / `maxDepth` | iterative walk |
 | `rows[]` | first `maxRows` members of the root sequence, in file order; each is `buildRow(row, index, line)` over the same pairs `checkEntries` already visits, so a row can never describe a node the checks did not see |
 | `rows[].line` | node `range[0]` of the row mapping, mapped through the same newline offsets as diagnostics |
-| `rows[].unmodelledKeyCount` | keys outside `MODELLED_KEYS` (`id`, `name`, `config`, `group`, `disabled`) — counted, never named |
+| `rows[].unmodelledKeyCount` | keys outside `MODELLED_KEYS` (`id`, `name`, `config`, `group`, `disabled`) — counted, never named. `inject` is a declared `EntryOptions` field (§2.3) that this reader deliberately does not model, so it lands here too; a closed word for it needs its own review because `Inject` is a union of a service-name array and an intercept-config object |
 | `rowsTruncated` | true when the root sequence holds more members than `maxRows`; false when `rows` is `null` |
 | `notDerived` / `limitations` | fixed lists copied per summary from `PROFILE_DUMP_NOT_DERIVED` / `PROFILE_DUMP_LIMITATIONS` |
 | `diagnostics[].line` | node `range[0]` mapped to a line via newline offsets of the input text |

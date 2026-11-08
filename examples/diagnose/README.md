@@ -14,7 +14,7 @@ reader flags", never "this profile works".
 
 | File | Lane | What it exercises |
 | --- | --- | --- |
-| `profile.yml` | `--profile` | A two-entry `--dump-config` export: both rows carry a `group` label, one is `disabled: true`, both have a `config` block, and the `# ==` origin comments are present as a real export writes them. |
+| `profile.yml` | `--profile` | A two-row **synthetic** dump: the `# ==` origin comments are written the way a real export writes them, one row is `disabled: true`, both have a `config` block. It is not loader-valid and does not claim to be: `name` carries display text instead of a module specifier, and `group: demo` is a string although `EntryOptions` declares `group?: boolean \| null` (`vendor/loader/src/config/entry.ts:8-24`), so the row window reports `group: 'other'` — that is the vocabulary working, not a profile to copy. |
 | `runtime-evidence.json` | `--runtime` | A coexistence-evidence document reporting all three required cases as `passed`. |
 | `admission-evidence.json` | `--admission` | An admission-evidence document with the four required catalog cases, one of them reported `refused`. |
 

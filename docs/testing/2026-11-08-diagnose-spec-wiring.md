@@ -245,6 +245,14 @@ never changed.
   `e57647477be5ec8b4a0f3c39dc3c5ae91d9f3aa029a9fe413f917af8ee6a8835`. The
   committed record states this rather than implying a single frozen binary across
   all three.
+- **`examples/diagnose/README.md` was corrected on 2026-11-09**, during the review of
+  the row-window slice: it had called `profile.yml` a faithful `--dump-config`
+  export and `group: demo` a "group label", which `EntryOptions`
+  (`group?: boolean | null`) contradicts. This file is a hashed selected input of
+  this runner, so its current bytes are not the bytes the three wiring rounds
+  hashed. The other three example inputs are unchanged (`profile.yml`
+  `bf4cdb0e…`), and no test, payload or measured number depends on the README's
+  prose.
 
 ## 8. Files
 

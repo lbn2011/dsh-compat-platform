@@ -787,6 +787,15 @@ safety walk still descends through `config` looking for tags, aliases and size �
 semantics are inferred there, and no claim is made that the remaining metadata fields were
 validated.
 
+`MODELLED_KEYS` is `id`, `name`, `config`, `group`, `disabled`. `EntryOptions` declares a sixth
+serialisable field, `inject?: Inject | null`
+(`vendor/loader/src/config/entry.ts:8-24`, and §2.3 of the design doc lists it), and this reader
+deliberately does **not** model it: its value is a union of an array of service names and an
+intercept configuration object, so a closed word for it would need its own review. A row that
+carries `inject` therefore reports it in `unmodelledKeyCount` like any other unmodelled key —
+counted, never named, never interpreted. That is a known limit of the row vocabulary, not a
+judgement that `inject` is foreign to `EntryOptions`.
+
 An **absent** `id` or `name` is not an error in this version. `EntryGroup.create()` accepts
 `Omit<EntryOptions, 'id'>` and calls `tree.ensureId(options)` (`vendor/loader/src/config/group.ts:20-22`),
 which is evidence about `id` only; it says nothing about when a missing `name` is legal. Because
@@ -861,15 +870,17 @@ returns a partial walk as if it were complete (`counts` is `null`, `inventory` i
   those bytes, is unchanged and these three samples are not "68 tests"), and says nothing about export
   completeness, plugin loadability or hostile hosts. The record is
   [`docs/testing/2026-11-08-profile-dump-retained-export.md`](../../docs/testing/2026-11-08-profile-dump-retained-export.md).
-- **The `0.2-draft.1` shape was verified on 2026-11-09 in four bounded rounds under the same
-  envelope.** This lane's single test file passed `78/78` (`0` fail) on the row-window and
+- **The `0.2-draft.1` shape was verified on 2026-11-09 in four bounded rounds of this lane's
+  runner, plus one carrier round, all under the same envelope.** This lane's single test file
+  passed `78/78` (`0` fail) on the row-window and
   guard-list cases, then `81/81` after three process-level cases were added (the shipped
   `examples/diagnose/profile.yml` read from disk, a partial failure exiting `1`, a refusal
   exiting `2`); between those two, an intermediate round was `80/81` because one new assertion
   demanded the wrong `ordinal`. The same three retained captures were replayed against the
-  row-carrying shape, `3/3`, `verdict=pass`. `81/81` supersedes `78/78` only as *the count for the
-  current bytes*, and neither supersedes `65/65` as a claim about earlier bytes; no run is
-  retracted and no counts are additive. Still one file, still not the whole suite. Record:
+  row-carrying shape, `3/3`, `verdict=pass`, and the diagnostics carrier was re-run once
+  (`49/49`) because it embeds the summary untouched. `81/81` supersedes `78/78` only as *the
+  count for the current bytes*, and neither supersedes `65/65` as a claim about earlier bytes; no
+  run is retracted and no counts are additive. Still one file, still not the whole suite. Record:
   [`docs/testing/2026-11-08-profile-dump-rows.md`](../../docs/testing/2026-11-08-profile-dump-rows.md).
 - **Boundaries still pending:** a fresh host-export-to-diagnostic run, production-scale profile
   coverage, hostile-host behavior, cross-Node-version behavior, and host compatibility. Non-UTF-8 and over-limit files

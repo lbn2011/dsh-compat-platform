@@ -631,8 +631,9 @@ function judgeSummary(doc, expect) {
       if (!isNonNegativeInt(row.unmodelledKeyCount)) {
         return { ok: false, code: 65, reason: 'row-unmodelled-key-count' };
       }
-      // A row's keys are counted against the row's size: modelled plus unmodelled cannot
-      // exceed it, and cannot be fewer than the five modelled names that are present.
+      // A row's unmodelled keys are a subset of its own keys, so that count can never exceed
+      // `keyCount`; nothing is asserted about the complement, because a row may legitimately
+      // carry two modelled keys and three unmodelled ones.
       if (row.unmodelledKeyCount > row.keyCount) return { ok: false, code: 65, reason: 'row-unmodelled-over-key-count' };
     }
   }

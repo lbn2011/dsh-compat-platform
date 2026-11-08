@@ -1,9 +1,11 @@
 # profile-dump `0.2-draft.1`: the row window and the two guard lists
 
-**Status: executed, four bounded rounds — three green, one red on a test-side assertion.** This record covers the shape change that
-turned `profile-dump-summary/0.1-draft.1` into `0.2-draft.1` by adding `rows`, `rowsTruncated`,
-`notDerived` and `limitations`, plus the `maxRows` limit. It reports what those two rounds measured
-on this machine and nothing else.
+**Status: executed, five bounded rounds — four green, one red on a test-side assertion.** Four of
+them ran the summariser's own runner (§2–§4); the fifth re-ran the diagnostics carrier (§5) because
+a summary shape change is only safe if the entry that embeds the summary still passes. This record
+covers the shape change that turned `profile-dump-summary/0.1-draft.1` into `0.2-draft.1` by adding
+`rows`, `rowsTruncated`, `notDerived` and `limitations`, plus the `maxRows` limit. It reports what
+those five rounds measured on this machine and nothing else.
 
 It is a **separate record** from
 [`2026-11-08-profile-dump.md`](./2026-11-08-profile-dump.md) (the `0.1-draft.1` rounds) and from
@@ -67,7 +69,47 @@ Envelope: 384 MiB / swap 0 / `TasksMax=32` / `CPUQuota=50%` / `RuntimeMaxSec=120
 `78` is the count **for these bytes**. It is not `65` plus anything portable: the added cases are
 the row-window and guard-list ones, and earlier counts belong to earlier bytes.
 
-## 2b. Rounds 3 and 4 — the shipped example and both failure paths, as processes
+## 3. Round 2 — the three retained real captures, 0.2 shape
+
+Launcher `scripts/profile-dump-retained-export/run.sh`; raw artefacts
+`/data/dsh-ecosystem-test-artifacts/runs/20261108T163324Z-profile-dump-retained-export-843007-22855`.
+
+Input bytes are the same three historical captures as the earlier replay, unchanged and re-pinned
+by digest at run time:
+
+| Sample | Bytes | sha256 | Exit | stderr | Verdict |
+| --- | --- | --- | --- | --- | --- |
+| `probe` | `333` | `222a50d0…f810cc` | `0` | `0` | `pass` |
+| `denied` | `162` | `34ea1fbc…a0f0` | `0` | `0` | `pass` |
+| `script-probe` | `568` | `3af2218c…b44b` | `0` | `0` | `pass` |
+
+Runner fields: `verdict=pass`, `samples_verified=3`, `child_runs=3`, `first_failure=none`,
+`selected_inputs=11`, `hashes=identical`, `acceptance_exit=0`, `write_failures=0`,
+`memory_peak=32686080` B, `pids_peak=17`, `mem_available_kib=1251572` ≥ `819200`,
+terminal `main_pid=0` / `confirmation=settled`, `samples_snapshot_state=identical`,
+`yaml_manifest_snapshot_state=identical` (233 files).
+
+What the verifier judged on those real bytes (`script-probe`, the two-row sample):
+
+```json
+{ "index": 1, "line": 2, "keyCount": 3, "idKind": "string", "nameKind": "string",
+  "group": "absent", "disabled": "absent", "config": "mapping",
+  "configKeyCount": 2, "unmodelledKeyCount": 0 }
+```
+
+with `profileDumpSummary=profile-dump-summary/0.2-draft.1`, `rows.length === counts.entries === 2`,
+`rowsTruncated=false`, `notDerived` the five verbatim names and `limitations` the eight fixed codes.
+The `probe` and `denied` samples each produced one row with `configKeyCount: 2`; the `!!js` scalars
+in `script-probe` stayed counted-and-flagged, never evaluated.
+
+The verifier refuses, at code `65`, a row whose key set is not exactly the closed one, whose
+`index` is not its 1-based position, whose vocabulary words are outside the closed sets, whose
+`configKeyCount` is present without a mapping config, whose `unmodelledKeyCount` exceeds
+`keyCount`, or whose window length and `rowsTruncated` flag disagree in either direction. It also
+compares `maxRows: 64` and both guard lists exactly, so a silently different cap or a reworded
+limitation is a failure rather than a drift.
+
+## 4. Rounds 3 and 4 — the shipped example and both failure paths, as processes
 
 Rounds 1 and 2 exercised the in-process API and three historical captures, but no *real repository
 fixture* and no *failure path* crossed a process boundary. Three cases were added for that and run
@@ -112,7 +154,7 @@ And on the two failure paths, as processes: the partial case exits `1` with
 `counts: null`, `rows: null` and `rowsTruncated: false` — the null-not-empty rule visible at the
 process boundary, with both guard lists still present.
 
-## 2c. Round 5 — the envelope carrier, re-run once against the new summary
+## 5. Round 5 — the envelope carrier, re-run once against the new summary
 
 The unified diagnostics entry (`packages/analyzer/src/diagnose.js`) carries a profile summary
 through untouched, so a shape change there is only safe if that carrier still passes. One bounded
@@ -129,47 +171,7 @@ nothing in the envelope does; the rows are extra payload inside `profile.summary
 that pins the summary's version string now imports `PROFILE_DUMP_SCHEMA` instead of a literal, so it
 tracks the module rather than freezing a shape.
 
-## 3. Round 2 — the three retained real captures, 0.2 shape
-
-Launcher `scripts/profile-dump-retained-export/run.sh`; raw artefacts
-`/data/dsh-ecosystem-test-artifacts/runs/20261108T163324Z-profile-dump-retained-export-843007-22855`.
-
-Input bytes are the same three historical captures as the earlier replay, unchanged and re-pinned
-by digest at run time:
-
-| Sample | Bytes | sha256 | Exit | stderr | Verdict |
-| --- | --- | --- | --- | --- | --- |
-| `probe` | `333` | `222a50d0…f810cc` | `0` | `0` | `pass` |
-| `denied` | `162` | `34ea1fbc…a0f0` | `0` | `0` | `pass` |
-| `script-probe` | `568` | `3af2218c…b44b` | `0` | `0` | `pass` |
-
-Runner fields: `verdict=pass`, `samples_verified=3`, `child_runs=3`, `first_failure=none`,
-`selected_inputs=11`, `hashes=identical`, `acceptance_exit=0`, `write_failures=0`,
-`memory_peak=32686080` B, `pids_peak=17`, `mem_available_kib=1251572` ≥ `819200`,
-terminal `main_pid=0` / `confirmation=settled`, `samples_snapshot_state=identical`,
-`yaml_manifest_snapshot_state=identical` (233 files).
-
-What the verifier judged on those real bytes (`script-probe`, the two-row sample):
-
-```json
-{ "index": 1, "line": 2, "keyCount": 3, "idKind": "string", "nameKind": "string",
-  "group": "absent", "disabled": "absent", "config": "mapping",
-  "configKeyCount": 2, "unmodelledKeyCount": 0 }
-```
-
-with `profileDumpSummary=profile-dump-summary/0.2-draft.1`, `rows.length === counts.entries === 2`,
-`rowsTruncated=false`, `notDerived` the five verbatim names and `limitations` the eight fixed codes.
-The `probe` and `denied` samples each produced one row with `configKeyCount: 2`; the `!!js` scalars
-in `script-probe` stayed counted-and-flagged, never evaluated.
-
-The verifier refuses, at code `65`, a row whose key set is not exactly the closed one, whose
-`index` is not its 1-based position, whose vocabulary words are outside the closed sets, whose
-`configKeyCount` is present without a mapping config, whose `unmodelledKeyCount` exceeds
-`keyCount`, or whose window length and `rowsTruncated` flag disagree in either direction. It also
-compares `maxRows: 64` and both guard lists exactly, so a silently different cap or a reworded
-limitation is a failure rather than a drift.
-
-## 4. Deviations and housekeeping
+## 6. Deviations and housekeeping
 
 1. Both runner scripts were `600` in the working tree and were `chmod 755`-ed before the runs. File
    modes do not enter the sha256 manifest; the change happened before hashing and is visible in the
@@ -181,9 +183,25 @@ limitation is a failure rather than a drift.
 3. No run was hidden to reach green. Round 3 failed on a test-side assertion; it is recorded above
    with its figures, and round 4 changed only that assertion. Rounds 1 and 2 were single runs each.
 4. `node --check` was used on edited files while writing them. Parse-only, no envelope, no
-   evidence — the numbers above come from the two runs.
+   evidence — the numbers above come from the five runs, not from a syntax check.
+5. **Review edits, 2026-11-09 (this record).** The review of this slice corrected prose, not
+   measured behaviour: the status line above now counts five rounds instead of four ("§2–§4" for
+   the summariser's runner and "§5" for the carrier), the sections were re-ordered into round
+   order (they were written as §2, §2b, §2c, §3), and the `packages/analyzer/README.md` note now
+   names `inject` as a deliberately unmodelled `EntryOptions` field. No figure, hash or exit code
+   in §2–§5 changed.
+6. **The verifier's comment was corrected, so its bytes differ from `06257f01…`.** One comment in
+   `retained-export.mjs` claimed a check it did not make ("cannot be fewer than the five modelled
+   names that are present"); the executable path is untouched and `node --check` is clean, but a
+   comment is bytes, so the file hashed at run time is not the file on disk now. Nothing in this
+   record is retracted by that: the two-pass verdict stands on the bytes it ran on.
+7. **A fourth file moved outside this record:** `examples/diagnose/README.md` (a hashed input of
+   the *wiring* runner, not of this one) called `group: demo` a "group label"; it is now stated as
+   a synthetic, loader-invalid value that exercises the `'other'` word. `examples/diagnose/profile.yml`
+   itself is unchanged (`bf4cdb0e…`), so the round-3/4 fixture hash above still matches the bytes on
+   disk.
 
-## 5. Files as executed
+## 7. Files as executed
 
 | File | sha256 at run time |
 | --- | --- |
@@ -202,9 +220,10 @@ limitation is a failure rather than a drift.
 
 `packages/analyzer/README.md` **is** a hashed input of this runner, and its value was
 `b3b00b1dc38c92eafe736309c57c905362619b7be39fb38f69f43b501162fcd3` for rounds 3–4; it was edited
-afterwards (verification-status wording, `78/78` → `81/81`). That later editing is a documentation
-change made *after* the measured runs, so the number it quotes is not part of what ran. Rounds 1–2
-saw a different README, which is why its hash is not listed beside them.
+afterwards (verification-status wording, `78/78` → `81/81`, and during the 2026-11-09 review a note
+that `inject` is deliberately unmodelled). That later editing is a documentation change made
+*after* the measured runs, so the number it quotes is not part of what ran. Rounds 1–2 saw a
+different README, which is why its hash is not listed beside them.
 
 What ran, exactly: rounds 1–2 used the `2089f8e4…` runner and `374831a2…` test file; rounds 3–4
 used the `419b2eb2…` runner, the `50c75980…` test file and the `bf4cdb0e…` example; round 5 used
