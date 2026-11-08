@@ -65,10 +65,17 @@ for no reachable reason.
 - `provenance` must be an array: the envelope's per-source baseline projection is the
   field that stops a reader assuming every source names a commit, so a page that
   dropped it would be worse than one that never showed it;
-- explicit field checks name the field that failed, and a final
-  `diagnoseExitCode(report)` call guarantees the document served is one the
-  analyzer's own exit mapper accepts. A throw there is reported as
+- explicit field checks name the field that failed, and a final local contract
+  check re-tests the two facts this router relies on and the field checks do not
+  cover: the `correlation` literal, and the closed outcome word of every lane
+  block that is present. A disagreement is reported as
   `{reason: 'ENVELOPE_SHAPE', field: 'contract'}`.
+
+  This check used to call `diagnoseExitCode` from the analyzer across a relative
+  path. That made the package uninstallable from a tarball — `../../analyzer/src/diagnose.js`
+  does not exist outside the checkout — so the two facts it added are now checked
+  here instead. The analyzer remains the owner of the deeper block-shape rules; a
+  reader who needs them calls `diagnoseExitCode` themselves.
 
 `src/page.js` renders every value with `textContent` (no `innerHTML`), carries no
 absolute origin, touches no process API, and prints `certification: false` and

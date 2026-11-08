@@ -8,6 +8,10 @@
     "node": ">=24.9.0"
   },
   "main": "./src/trusted-extraction-supervisor.js",
+  "files": [
+    "src/",
+    "README.md"
+  ],
   "exports": {
     ".": "./src/trusted-extraction-supervisor.js",
     "./isolation-policy": "./src/isolation-policy.js",

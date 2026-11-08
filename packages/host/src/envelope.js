@@ -12,17 +12,19 @@
  * carry a file path, a filesystem error string or any other host detail out of
  * the process, so a refused read leaks nothing about the machine.
  *
- * WHY THE LIBRARY IS CONSULTED TOO: `diagnoseExitCode` from the analyzer is the
- * canonical shape contract. The explicit checks below exist so the refusal
- * names a field; the library call exists so this module can never serve a
- * document its own exit mapper would throw on. If they ever disagree, the
- * document is refused, not rendered.
+ * WHY THE CONTRACT IS CHECKED HERE AND NOT IMPORTED: this module used to call
+ * `diagnoseExitCode` from the analyzer across a relative path. That works inside
+ * the repository and fails the moment the package is installed from a tarball,
+ * where `../../analyzer/src/diagnose.js` does not exist — a real installability
+ * defect found by the packaging batch. The two facts that call actually added
+ * are re-checked locally below: the correlation literal, and the closed outcome
+ * word of every lane block that is present. The deeper block-shape rules stay
+ * the analyzer's own contract; a reader who needs them calls `diagnoseExitCode`
+ * themselves. Nothing is served that this module has not itself accepted.
  */
 
 import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
-
-import { diagnoseExitCode } from '../../analyzer/src/diagnose.js'
 
 /** Refuse to read past one MiB: the same ceiling the analyzer puts on inputs. */
 export const ENVELOPE_BYTE_CEILING = 1024 * 1024
@@ -86,6 +88,33 @@ export function checkEnvelopeShape(report) {
 }
 
 /**
+ * The two contract facts this router itself relies on.
+ *
+ * They are the ones `diagnoseExitCode` would have caught that the field checks
+ * above do not: the correlation literal, and whether a lane block that is
+ * present carries a word from the closed outcome set.
+ *
+ * @param {any} report - Parsed envelope candidate.
+ * @returns {null | { field: string }} null when acceptable.
+ */
+const OUTCOME_VALUES = new Set(['unknown', 'clear', 'attention', 'invalid', 'error'])
+const LANE_NAMES = /** @type {const} */ (['static', 'runtime', 'admission'])
+
+function checkContract(report) {
+  if (report.correlation !== 'not-established') return { field: 'contract' }
+  if (report.combinedReport === null) return null
+  const channels = report.combinedReport.channels
+  if (!isPlainRecord(channels)) return { field: 'contract' }
+  for (const lane of LANE_NAMES) {
+    if (!Object.hasOwn(channels, lane)) continue
+    const block = channels[lane]
+    if (!isPlainRecord(block)) return { field: 'contract' }
+    if (!OUTCOME_VALUES.has(block.outcome)) return { field: 'contract' }
+  }
+  return null
+}
+
+/**
  * Read and gate one envelope file.
  *
  * @param {string} filePath - Absolute path of the configured envelope.
@@ -132,10 +161,9 @@ export async function readEnvelope(filePath) {
   const shape = checkEnvelopeShape(report)
   if (shape !== null) return { ok: false, reason: ENVELOPE_REASONS.shape, field: shape.field }
 
-  try {
-    diagnoseExitCode(report)
-  } catch {
-    return { ok: false, reason: ENVELOPE_REASONS.shape, field: 'contract' }
+  const contract = checkContract(report)
+  if (contract !== null) {
+    return { ok: false, reason: ENVELOPE_REASONS.shape, field: contract.field }
   }
 
   return {

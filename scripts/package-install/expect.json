@@ -1,0 +1,47 @@
+{
+  "packages": {
+    "dsh-compat-platform": {
+      "version": "0.0.0"
+    },
+    "dsh-compat-diagnostics-ui": {
+      "version": "0.0.0-draft.1"
+    },
+    "dsh-compat-trusted-extraction": {
+      "version": "0.0.0-draft.1"
+    },
+    "dsh-compat-repair": {
+      "version": "0.0.0-draft.1"
+    }
+  },
+  "surfaces": {
+    "dsh-compat-platform/profile-dump": [
+      "summarizeProfileDumpText",
+      "profileDumpExitCode"
+    ],
+    "dsh-compat-platform/dependency-shape": [
+      "summarizeDependencyShapeText",
+      "dependencyShapeExitCode"
+    ],
+    "dsh-compat-platform/diagnose": [
+      "buildDiagnoseReport",
+      "diagnoseExitCode"
+    ],
+    "dsh-compat-diagnostics-ui": [
+      "apply"
+    ],
+    "dsh-compat-trusted-extraction/isolation-policy": [
+      "evaluateGates",
+      "networkVerdict"
+    ],
+    "dsh-compat-repair/repair-apply": [
+      "decideApply",
+      "buildReceipt"
+    ],
+    "dsh-compat-repair/fixture-applier": [
+      "fixturePath",
+      "readFixture",
+      "applyApproved",
+      "restoreFixture"
+    ]
+  }
+}

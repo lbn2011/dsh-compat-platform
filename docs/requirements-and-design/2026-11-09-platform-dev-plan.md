@@ -137,6 +137,18 @@ sentence would be false.
 Gate: install and one bounded invocation succeed from the tarballs alone; a deliberate missing-peer
 case is recorded as a failure, not a skip.
 
+**Status 2026-11-09: done.** `scripts/package-install/` packs the four packages plus
+`yaml@2.9.1` offline and installs them into a fresh consumer directory that has no sibling
+checkout; the probe resolves every documented subpath by package specifier (24 checks) and
+the missing-dependency case is a loud `ERR_MODULE_NOT_FOUND` rather than a skip. Ten
+invocations under the envelope, the last two green on identical inputs —
+`docs/testing/2026-11-09-package-install.md`. Three defects were found in the process, one
+of them in shipped code: `packages/host/src/envelope.js` imported the analyzer across a
+relative path, which no in-repo test could catch and which made the tarball uninstallable;
+the two facts that import added are now checked locally and the host suite stayed green.
+*(Amended 2026-11-09: the delivery is stronger than the gate — it also proves the
+missing-dependency failure — but nothing is published and `files` is not audited.)*
+
 ### S6 — Second host version and matrix  *(blocked on a user decision)*
 
 - Choose the second host version from intended users, not from what happens to be installed.

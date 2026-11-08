@@ -8,6 +8,10 @@
     "node": ">=24.9.0"
   },
   "main": "./src/repair-plan.js",
+  "files": [
+    "src/",
+    "README.md"
+  ],
   "exports": {
     ".": "./src/repair-plan.js",
     "./repair-plan": "./src/repair-plan.js",
