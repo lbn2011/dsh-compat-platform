@@ -200,6 +200,13 @@ limitation is a failure rather than a drift.
 | `scripts/profile-dump-retained-export/payload.sh` | `53c2661d47e72aaaf0a1c2caa3085ba48d6f7c54a93c143048195feb33c14de3` |
 | `scripts/profile-dump-retained-export/retained-export.mjs` | `06257f015df4ed8d38ffaed58f4d9d5cb9059e177e5a83b58c5b81100a0220fa` |
 
-`packages/analyzer/README.md` was edited after both runs (verification-status wording only), so it
-is deliberately absent from this table: the bytes that ran are the nine above plus the two
-launchers.
+`packages/analyzer/README.md` **is** a hashed input of this runner, and its value was
+`b3b00b1dc38c92eafe736309c57c905362619b7be39fb38f69f43b501162fcd3` for rounds 3–4; it was edited
+afterwards (verification-status wording, `78/78` → `81/81`). That later editing is a documentation
+change made *after* the measured runs, so the number it quotes is not part of what ran. Rounds 1–2
+saw a different README, which is why its hash is not listed beside them.
+
+What ran, exactly: rounds 1–2 used the `2089f8e4…` runner and `374831a2…` test file; rounds 3–4
+used the `419b2eb2…` runner, the `50c75980…` test file and the `bf4cdb0e…` example; round 5 used
+the diagnose-batch runner and its own twelve selected inputs. No file was edited between a run and
+the transcription of that run's figures.
