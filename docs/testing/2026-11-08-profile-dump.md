@@ -182,7 +182,8 @@ altered at the source.
   conformance, and `!!js` expression evaluation are all unexercised; the suite asserts on this
   package's own summary, not on DSH behavior.
 - **Raw evidence is not published here.** The run directories live on this machine under
-  `/data/dsh-ecosystem-test-artifacts/runs/…` and are not part of the repository or downloadable.
+  `/data/dsh-ecosystem-test-artifacts/runs/`; the three full absolute paths are listed in §5.
+  They are not part of the repository and are not downloadable.
 
 ## 5. Evidence paths
 
