@@ -1,0 +1,27 @@
+# == base
+# A synthetic, hand-written stand-in for what `dsh --profile <name> --dump-config` prints.
+#
+# It is NOT a valid loader configuration and is never loaded: nothing here is imported,
+# resolved or executed. Only the *shape* of the `inject` declarations is read.
+#
+# The four rows show the four shapes this reader tells apart: a list of service names, an
+# intercept mapping, an explicit null, and no key at all. Add `inject: some-service-name` to
+# any row to see the entry-level diagnostic (exit 1) for a shape the loader's union does not
+# cover.
+- id: example.plugin-alpha
+  name: example-plugin-alpha
+  config:
+    greeting: hello
+  inject:
+    - exampleServiceAlpha
+    - exampleServiceAlphaHelper
+- id: example.plugin-beta
+  name: example-plugin-beta
+  inject:
+    exampleServiceBeta:
+      optional: true
+- id: example.plugin-gamma
+  name: example-plugin-gamma
+  inject: null
+- id: example.plugin-delta
+  name: example-plugin-delta

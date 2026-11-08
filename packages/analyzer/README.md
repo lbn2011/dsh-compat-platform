@@ -1090,3 +1090,132 @@ there is no `admission-evidence` package subpath to import):
 > and refuse `fixtures/invalid-declaration.json` and `fixtures/clean.json`-as-admission, with the six
 > CLI cases at `0/0/2/1/2/2` and the wiring file at `6/6` TAP. That is all it is: no host ran, no
 > plugin loaded, `certification` stays `false`, and this is not the full package suite.
+
+## 14. Dependency-shape summary — `dsh-compat-dependency-shape`
+
+A separate, deliberately narrow entry beside §12. `profile-dump` reports a row window whose
+fields are the ones `EntryOptions` declares **minus `inject`**, because
+`Inject = (keyof M)[] | { [K in keyof M]?: M[K] }` (`vendor/cordis/src/registry.ts:19`) is a
+union of a *service-name list* and an *intercept config*: one word inside a row would read as
+"this plugin depends on X", which a dump cannot support. This command answers the narrower
+question — **how many rows declare `inject`, of which shape, and how large** — and carries its
+own `notDerived` and `limitations` so the two artifacts cannot be quoted for each other.
+
+Design: [`docs/requirements-and-design/2026-11-09-dependency-shape-design.md`](../../docs/requirements-and-design/2026-11-09-dependency-shape-design.md).
+
+### 14.1 What it reads
+
+Exactly one explicitly named regular file: a `dsh --profile <name> --dump-config` export, the
+same input as §12. No stdin, no flags, no globs, no defaults. The reader is `readEvidenceFile()`
+from `evidence-cli.js`, reused unchanged: non-blocking open, `fstat` on the open descriptor,
+regular files only, `1048576`-byte cap with a one-byte probe, strict UTF-8.
+
+### 14.2 Output
+
+One JSON document on stdout, always. Counters only — **no id, name, service name, key, value,
+origin label or expression text**.
+
+```json
+{
+  "dependencyShapeSummary": "dependency-shape-summary/0.1-draft.1",
+  "input": { "bytes": 947, "lines": 28 },
+  "documents": 1,
+  "inventory": "present",
+  "root": "sequence",
+  "counts": {
+    "rows": 4,
+    "rowsWithInject": 3,
+    "injectAbsent": 1,
+    "injectNull": 1,
+    "injectSequence": 1,
+    "injectMapping": 1,
+    "injectOther": 0,
+    "injectSequenceItems": 2,
+    "injectNames": 2,
+    "injectTaggedItems": 0,
+    "injectNonScalarItems": 0,
+    "injectMappingKeys": 1,
+    "injectEmptyMappings": 0,
+    "jsScalars": 0,
+    "distinctTags": 0,
+    "nodes": 37,
+    "scalars": 28,
+    "maxDepth": 5
+  },
+  "limits": { "maxBytes": 1048576, "maxLines": 20000, "maxDepth": 32,
+              "maxNodes": 20000, "maxEntries": 5000, "maxDiagnostics": 64 },
+  "diagnostics": [],
+  "diagnosticsTruncated": false,
+  "completeness": "unknown",
+  "runtimeValidation": "not-performed",
+  "certification": false,
+  "notDerived": ["declarations", "availableCapabilities", "resources",
+                 "activation", "loadability", "dependencyResolution"],
+  "limitations": ["DEPENDENCY_SHAPE_IS_NOT_RESOLUTION", "INJECT_ITEM_NAMES_NOT_EMITTED",
+                  "NO_ROW_WINDOW_IN_THIS_SUMMARY", "ROW_SET_COMPLETENESS_UNKNOWN",
+                  "NO_DEPENDENCY_CLOSURE_ESTABLISHED", "NO_LOADABILITY_OR_ACTIVATION_OBSERVED",
+                  "CONFIG_VALUES_NOT_INSPECTED", "CERTIFICATION_NOT_CLAIMED",
+                  "INPUT_IS_PARSED_TEXT_NOT_A_SANDBOX"]
+}
+```
+
+`counts` is `null` — never zeros — whenever `inventory` is `none`: a refused document has no
+rows, and `0` there would read as "this export declares no dependency", the exact over-read the
+command exists to avoid.
+
+Two invariants hold on every `present`/`empty` inventory, and both the suite and the replay
+verifier assert them:
+
+```
+rowsWithInject === injectNull + injectSequence + injectMapping + injectOther
+injectSequenceItems === injectNames + injectTaggedItems + injectNonScalarItems
+```
+
+The five `inject` words are `absent`, `null`, `sequence`, `mapping` and `other`. `null` is its
+own word because `EntryOptions.inject?: Inject | null` makes it legal and the loader reads it as
+"not set"; `absent` stays separate for the reason §12.2 gives. Inside a sequence, an item is a
+`name` (a literal string), `tagged` (the opaque `!!js` form, recorded but never read as a value)
+or `non-scalar` (anything else, including a nested mapping).
+
+### 14.3 Exit codes (closed table)
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Parsed; no entry-level diagnostic (an `inject` holding `!!js` alone stays `0`) |
+| `1` | Parsed, but at least one entry-level diagnostic: `INJECT_SHAPE_NOT_MODELLED` or `INJECT_ITEM_NOT_A_NAME` |
+| `2` | Unusable: read failure, not UTF-8, over limits, parse error, unexpected tag, anchor/alias, merge key, tagged key, multiple documents, wrong root shape, a row that is not a mapping |
+| `5` | Internal failure, including a failed stdout write |
+| `64` | Usage error |
+
+### 14.4 Trust boundary
+
+The module receives text and imports exactly one thing: `yaml`. It never calls `parse()` or
+`toJS()`, never evaluates `!!js`, never resolves an alias or a merge key, never resolves a module
+specifier, and never surfaces a parser message (those carry a source excerpt). Refusals match §12
+code for code: the parse prologue and the safety walk are a second copy of the ones in
+`profile-dump.js`, and `tests/dependency-shape.test.js` cross-checks both modules on a shared
+malformed-input corpus so the copies cannot drift apart silently.
+
+### 14.5 What this command does **not** establish
+
+That any declared service is provided, that any dependency is satisfied, that anything would
+load or activate, that the row set is complete, or that the export is a valid loader
+configuration. `completeness` is always `"unknown"`, `runtimeValidation` always
+`"not-performed"`, `certification` always `false`. A row that declares two service names is one
+row with two items — not a resolution, not a graph edge and not a compatibility statement.
+
+### 14.6 Verification status
+
+**Executed: two bounded rounds, both green (2026-11-09).** Each round ran
+[`scripts/dependency-shape-batch/`](../../scripts/dependency-shape-batch/README.md) once under a
+384 MiB / swap 0 / 32 tasks / 50 % CPU / 120 s unit with a 192 MiB heap: `tests/dependency-shape.test.js`
+passed `37/37`, the shipped example returned the counters in §14.2 at exit `0`, the static contract
+passed, and the `yaml` regular-file manifest was byte-identical before and after. Round 1 peaked at
+`85,929,984` B and `23` pids, round 2 at `68,214,784` B and `23` pids. The numbers, both run
+directories and the ten selected-input hashes are in
+[`docs/testing/2026-11-09-dependency-shape.md`](../../docs/testing/2026-11-09-dependency-shape.md).
+
+Two limits of that evidence: it is this package's own summary checked against its own example and
+suite — no real DSH export was read and no host was involved — and this section was edited after the
+runs, so the hash of this file at run time is stated in the record rather than being the committed
+one.
