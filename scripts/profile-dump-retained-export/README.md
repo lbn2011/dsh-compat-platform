@@ -396,7 +396,7 @@ identical before and after.
 **What it did not establish.** Nothing about export completeness, plugin loadability,
 host compatibility, hostile hosts, or the failure paths. The three samples are historical
 captures of a real CLI over a synthetic fixture, replayed — not a re-export on this host.
-The CLI's own suite has its own record — `78/78` on the current `0.2-draft.1` bytes, `65/65` on
+The CLI's own suite has its own record — `81/81` on the current `0.2-draft.1` bytes, `65/65` on
 the earlier shape; these three samples are not extra test cases. A plain clone cannot re-verify: the inputs live only under
 `/data/dsh-ecosystem-test-artifacts` and the run directory is not published.
 

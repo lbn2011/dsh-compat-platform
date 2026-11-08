@@ -61,6 +61,8 @@ HASHED=(
   "$PKG/src/profile-dump.d.ts"
   "$PKG/src/profile-dump-cli.js"
   "$PKG/src/evidence-cli.js"   # reused unchanged by the new CLI; hashed as a two-point snapshot
+  # Read by the process-level tests, so a change to the shipped example is drift too.
+  "$REPO/examples/diagnose/profile.yml"
 )
 for t in "${TEST_FILES[@]}"; do HASHED+=("$PKG/$t"); done
 

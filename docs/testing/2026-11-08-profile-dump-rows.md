@@ -1,6 +1,6 @@
 # profile-dump `0.2-draft.1`: the row window and the two guard lists
 
-**Status: executed, two bounded rounds, both green.** This record covers the shape change that
+**Status: executed, four bounded rounds — three green, one red on a test-side assertion.** This record covers the shape change that
 turned `profile-dump-summary/0.1-draft.1` into `0.2-draft.1` by adding `rows`, `rowsTruncated`,
 `notDerived` and `limitations`, plus the `maxRows` limit. It reports what those two rounds measured
 on this machine and nothing else.
@@ -67,6 +67,51 @@ Envelope: 384 MiB / swap 0 / `TasksMax=32` / `CPUQuota=50%` / `RuntimeMaxSec=120
 `78` is the count **for these bytes**. It is not `65` plus anything portable: the added cases are
 the row-window and guard-list ones, and earlier counts belong to earlier bytes.
 
+## 2b. Rounds 3 and 4 — the shipped example and both failure paths, as processes
+
+Rounds 1 and 2 exercised the in-process API and three historical captures, but no *real repository
+fixture* and no *failure path* crossed a process boundary. Three cases were added for that and run
+under the same envelope: the shipped `examples/diagnose/profile.yml` read from disk (success), a
+document whose second entry has a non-string `id` (`1`, partial failure), and a root mapping (`2`,
+refusal). `scripts/profile-dump-batch/run.sh` also gained that example file as a tenth hashed
+input, because the tests now read it.
+
+| Field | Round 3 (failed) | Round 4 (green) |
+| --- | --- | --- |
+| run dir | `…/20261108T163955Z-profile-dump-batch-843804-30176` | `…/20261108T164017Z-profile-dump-batch-844094-19335` |
+| `acceptance_exit` | `72` | `0` |
+| TAP | `tests=81`, `pass=80`, `fail=1` | `tests=81`, `pass=81`, `fail=0` |
+| failure | new case asserted `diagnostics[0].ordinal === 1` | — |
+| selected inputs | `10`, `hashes=identical` | `10`, `hashes=identical` |
+| memory gate | `mem_available_kib=1192832` | `mem_available_kib=1261900` |
+| peaks | `memory_peak=71495680` B, `pids_peak=23` | `memory_peak=64409600` B, `pids_peak=23` |
+| terminal | settled, `main_pid=0` | settled, `main_pid=0` |
+| yaml snapshot | `identical` (233 files) | `identical` (233 files) |
+
+The round-3 failure was **test-side and only test-side**: the malformed entry is the *second* entry
+of the document, so `ordinal` is `2`; the assertion demanded `1`. The implementation was not
+changed to fit the assertion — the expectation was corrected and its comment now says it is pinned
+to the document, not to the position in `diagnostics`. Round 3 is kept here rather than replaced:
+it is what the first attempt measured.
+
+What round 4 established on the shipped fixture, through a real child process
+(`--max-old-space-size=192`, 5 s wall clock, 256 KiB buffer, environment reduced to `PATH`/`HOME`/
+`TMPDIR`):
+
+- exit `0`, `counts.entries === rows.length === 2`, `rowsTruncated === false`;
+- both rows `keyCount: 5`, `config: 'mapping'`, `configKeyCount: 1`, `group: 'other'` (the example
+  writes `group: demo`, a string, and `EntryOptions` declares `boolean | null` — the row reports
+  what is there), `disabled: 'false'` then `'true'`;
+- none of the example's own words appears in the serialized summary: no
+  `example.plugin-alpha`, `example.plugin-beta`, `Example Alpha`, `demo`, `greeting`, `hello` or
+  `retries`.
+
+And on the two failure paths, as processes: the partial case exits `1` with
+`ENTRY_ID_NOT_STRING` at `ordinal: 2` while **both** rows are still described
+(`idKind: ['string', 'non-string']`), and the refusal case exits `2` with `inventory: 'none'`,
+`counts: null`, `rows: null` and `rowsTruncated: false` — the null-not-empty rule visible at the
+process boundary, with both guard lists still present.
+
 ## 3. Round 2 — the three retained real captures, 0.2 shape
 
 Launcher `scripts/profile-dump-retained-export/run.sh`; raw artefacts
@@ -116,8 +161,8 @@ limitation is a failure rather than a drift.
    the earlier record) because the shape it pins moved to `0.2-draft.1`. That is maintenance of a
    verifier that tracks the published shape, not a re-judgement of the earlier run; the earlier
    record keeps its own hashes and numbers.
-3. No run was repeated to reach green. Round 1 and round 2 are single runs; if a later round is
-   needed, it gets its own row here.
+3. No run was hidden to reach green. Round 3 failed on a test-side assertion; it is recorded above
+   with its figures, and round 4 changed only that assertion. Rounds 1 and 2 were single runs each.
 4. `node --check` was used on edited files while writing them. Parse-only, no envelope, no
    evidence — the numbers above come from the two runs.
 
@@ -131,7 +176,9 @@ limitation is a failure rather than a drift.
 | `packages/analyzer/src/profile-dump.d.ts` | `0f4977238c1d530e9934676509d3ccf3e0d42f65831c331f62010ab7f3d6ca79` |
 | `packages/analyzer/src/profile-dump-cli.js` | `928ddcc3ecc580825331ca2e3e6b6fbff52bc028c14f07d146b53df9d3626a56` |
 | `packages/analyzer/src/evidence-cli.js` | `75b0c267e5c889420cacb45820d12b0f8067b49c18e8c0e1994b2cc1103128be` |
-| `packages/analyzer/tests/profile-dump.test.js` | `374831a231f7268a67552764489c05be225b1dfb48ce58ef796695725226e633` |
+| `packages/analyzer/tests/profile-dump.test.js` | `374831a231f7268a67552764489c05be225b1dfb48ce58ef796695725226e633` (rounds 1–2); `50c759800b0a1e223ab0d6361f9fae081d10b9738f725983460b2b90aaa306d7` (rounds 3–4) |
+| `scripts/profile-dump-batch/run.sh` (rounds 3–4) | `419b2eb26a2941de8ee8d05bdef1360e670a56fc403ff245d4848be113158c21` |
+| `examples/diagnose/profile.yml` (rounds 3–4) | `bf4cdb0e5ca124c77c57601ab1dc51cd9ddf614f6791c2155e57e1adb385bf7d` |
 | `scripts/profile-dump-retained-export/run.sh` | `ca15a6037027b800692ff351f0247a9c2a23be551920a077af5f3552fa62a038` |
 | `scripts/profile-dump-retained-export/payload.sh` | `53c2661d47e72aaaf0a1c2caa3085ba48d6f7c54a93c143048195feb33c14de3` |
 | `scripts/profile-dump-retained-export/retained-export.mjs` | `06257f015df4ed8d38ffaed58f4d9d5cb9059e177e5a83b58c5b81100a0220fa` |

@@ -861,12 +861,15 @@ returns a partial walk as if it were complete (`counts` is `null`, `inventory` i
   those bytes, is unchanged and these three samples are not "68 tests"), and says nothing about export
   completeness, plugin loadability or hostile hosts. The record is
   [`docs/testing/2026-11-08-profile-dump-retained-export.md`](../../docs/testing/2026-11-08-profile-dump-retained-export.md).
-- **The `0.2-draft.1` shape was verified twice on 2026-11-09, both bounded and under the same
-  envelope:** this lane's single test file passed `78/78` (`0` fail), and the same three retained
-  captures were replayed against the row-carrying shape, `3/3`, `verdict=pass`. The `78/78` figure
-  supersedes `65/65` only as *the count for the current bytes*: the tests added are the row-window
-  and guard-list cases, and the earlier runs are neither retracted nor merged into this one. Still
-  one file, still not the whole suite. Record:
+- **The `0.2-draft.1` shape was verified on 2026-11-09 in four bounded rounds under the same
+  envelope.** This lane's single test file passed `78/78` (`0` fail) on the row-window and
+  guard-list cases, then `81/81` after three process-level cases were added (the shipped
+  `examples/diagnose/profile.yml` read from disk, a partial failure exiting `1`, a refusal
+  exiting `2`); between those two, an intermediate round was `80/81` because one new assertion
+  demanded the wrong `ordinal`. The same three retained captures were replayed against the
+  row-carrying shape, `3/3`, `verdict=pass`. `81/81` supersedes `78/78` only as *the count for the
+  current bytes*, and neither supersedes `65/65` as a claim about earlier bytes; no run is
+  retracted and no counts are additive. Still one file, still not the whole suite. Record:
   [`docs/testing/2026-11-08-profile-dump-rows.md`](../../docs/testing/2026-11-08-profile-dump-rows.md).
 - **Boundaries still pending:** a fresh host-export-to-diagnostic run, production-scale profile
   coverage, hostile-host behavior, cross-Node-version behavior, and host compatibility. Non-UTF-8 and over-limit files
@@ -1034,7 +1037,7 @@ is no separate "bad report" exit code. It is a shape check, not a provenance or 
   assembler option key) was found by static reading and corrected **before** the first run. The
   defective form was never executed anywhere, so no artifact shows it or the failure it would
   have produced; what the wiring case establishes is the current mapping only.
-- **The modules it orchestrates do have their own records:** the profile summarizer is `78/78` on
+- **The modules it orchestrates do have their own records:** the profile summarizer is `81/81` on
   its current `0.2-draft.1` bytes and `65/65` on the earlier shape (§12.7), and the combined
   report has its own bounded acceptance (§ above). Those records do not
   transfer: they say nothing about this file's control flow, its exit mapping or its tests.

@@ -21,7 +21,7 @@ State as of this date, based on files present in this checkout. "Available" mean
 | Admission diagnostics | available | `dsh-compat-admission` |
 | Combined report | available | `dsh-compat-report` |
 | Snapshot comparison | available | `dsh-compat-compare` |
-| Profile dump summary | available — `0.2-draft.1` shape: row window + guard lists, one file `78/78`, three retained captures replayed `3/3` (2026-11-09) | `dsh-compat-profile-dump`; [`docs/testing/2026-11-08-profile-dump-rows.md`](docs/testing/2026-11-08-profile-dump-rows.md) |
+| Profile dump summary | available — `0.2-draft.1` shape: row window + guard lists, one file `81/81`, three retained captures replayed `3/3` (2026-11-09) | `dsh-compat-profile-dump`; [`docs/testing/2026-11-08-profile-dump-rows.md`](docs/testing/2026-11-08-profile-dump-rows.md) |
 | Unified read-only diagnostics | available — one file executed, 49/49 after test-side fixes (round 1: 40/48); not full-suite | `dsh-compat-diagnose`; `dsh-compat-platform/diagnose`; [`packages/analyzer/README.md` §13](packages/analyzer/README.md); [`docs/testing/2026-11-08-unified-diagnostics.md`](docs/testing/2026-11-08-unified-diagnostics.md) |
 | Read-only diagnostics GUI (host route) | available — two bounded rounds, second green (15/15 tests, seven HTTP checks); not browser-rendered | [`packages/host/`](packages/host/README.md); [`docs/testing/2026-11-08-read-only-diagnostics-gui.md`](docs/testing/2026-11-08-read-only-diagnostics-gui.md) |
 | `packages/client/`, `packages/runtime/` | not implemented (empty package directories) | — |

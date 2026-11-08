@@ -956,3 +956,92 @@ describe('profile-dump — the two guard lists', () => {
     assert.equal(summary.limitations.length, 8);
   });
 });
+
+describe('profile-dump CLI — a real repository fixture and both failure paths as processes', () => {
+  // These three cases run the committed CLI as a real child process, under the same bounded
+  // shape the acceptance envelope uses (192 MiB heap, wall-clock timeout, capped buffer, a
+  // freshly built environment). One is the shipped example fixture read from disk; the other two
+  // are the partial-failure and refusal paths, so "one bad entry" and "cannot be read" are shown
+  // to differ at the process boundary and not only in-process.
+  const scratch = mkdtempSync(join(tmpdir(), 'profile-dump-proc-'));
+  after(() => rmSync(scratch, { recursive: true, force: true }));
+
+  /** The shipped example profile, addressed as a filesystem path. Missing is a failure, not a skip. */
+  const EXAMPLE = fileURLToPath(new URL('../../../examples/diagnose/profile.yml', import.meta.url));
+
+  function runProcess(path) {
+    return spawnSync(process.execPath, ['--max-old-space-size=192', CLI_PATH, path], {
+      encoding: 'utf8',
+      timeout: 5000,
+      maxBuffer: 262144,
+      killSignal: 'SIGKILL',
+      env: {
+        PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+        HOME: homedir(),
+        TMPDIR: tmpdir(),
+      },
+    });
+  }
+
+  test('the shipped example fixture summarises to two rows, and copies none of its text', () => {
+    const result = runProcess(EXAMPLE);
+    assert.equal(result.error, undefined, result.error ? String(result.error) : '');
+    assert.equal(result.signal, null, `child was killed by ${String(result.signal)}`);
+    // A missing example would make this a `2` with INPUT_OPEN_FAILED: the fixture is required,
+    // and its absence must fail here rather than quietly reduce what this file verifies.
+    assert.equal(result.status, PROFILE_DUMP_EXIT.OK, result.stderr);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.profileDumpSummary, PROFILE_DUMP_SCHEMA);
+    assert.equal(parsed.counts.entries, 2);
+    assert.equal(parsed.rows.length, 2);
+    assert.equal(parsed.rowsTruncated, false);
+    assert.deepEqual(
+      parsed.rows.map((row) => [row.index, row.keyCount, row.disabled, row.group, row.config, row.configKeyCount]),
+      [
+        [1, 5, 'false', 'other', 'mapping', 1],
+        [2, 5, 'true', 'other', 'mapping', 1],
+      ],
+    );
+    // The example's own words: ids, names, the `group: demo` label and a config value. None of
+    // them may appear anywhere in the serialized summary.
+    for (const secret of ['example.plugin-alpha', 'example.plugin-beta', 'Example Alpha', 'demo', 'greeting', 'hello', 'retries']) {
+      assert.equal(result.stdout.includes(secret), false, `the summary echoed ${secret}`);
+    }
+  });
+
+  test('one malformed entry exits 1 as a process, and the window still describes the row', () => {
+    const path = join(scratch, 'partial.yml');
+    writeFileSync(path, '- id: a\n  name: ./a.js\n- id: 7\n  name: ./b.js\n');
+    const result = runProcess(path);
+    assert.equal(result.signal, null, `child was killed by ${String(result.signal)}`);
+    // `1`, not `2`: the document was read and walked, and one entry has a problem this reader
+    // reports. The rows are still there, because the counters are.
+    assert.equal(result.status, PROFILE_DUMP_EXIT.ENTRY_DIAGNOSTICS, result.stderr);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.diagnostics[0].code, PROFILE_DUMP_CODES.ENTRY_ID_NOT_STRING);
+    // The malformed entry is the second one in the document, and `ordinal` is 1-based, so this
+    // is `2` — the assertion is pinned to the document, not to the position in `diagnostics`.
+    assert.equal(parsed.diagnostics[0].ordinal, 2, 'the diagnostic names the second entry');
+    assert.equal(parsed.rows.length, 2, 'both rows are still described');
+    assert.deepEqual(
+      parsed.rows.map((row) => row.idKind),
+      ['string', 'non-string'],
+    );
+    assert.equal(result.stdout.includes('a.js'), false, 'the row echoed a name');
+  });
+
+  test('a root mapping is refused as a process, and the window is null rather than empty', () => {
+    const path = join(scratch, 'refused.yml');
+    writeFileSync(path, 'id: not-a-sequence\n');
+    const result = runProcess(path);
+    assert.equal(result.signal, null, `child was killed by ${String(result.signal)}`);
+    assert.equal(result.status, PROFILE_DUMP_EXIT.UNUSABLE, result.stderr);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.inventory, 'none');
+    assert.equal(parsed.counts, null);
+    assert.equal(parsed.rows, null, 'an empty array here would read as "no entries"');
+    assert.equal(parsed.rowsTruncated, false);
+    assert.equal(parsed.notDerived.length, 5);
+    assert.equal(parsed.limitations.length, 8);
+  });
+});
