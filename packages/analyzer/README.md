@@ -1105,17 +1105,20 @@ is no separate "bad report" exit code. It is a shape check, not a provenance or 
 ### 13.8 Real-validator wiring example (executed, 6/6 green)
 
 The 49/49 above loads a **synthetic** validator. A separate example connects this CLI to the
-**real** validators in the sibling `dsh-compat-spec` checkout, named by file path
-(`src/index.js` → `validateDeclaration`, `src/admission-evidence.js` → `validateAdmissionEvidence`;
-there is no `admission-evidence` package subpath to import):
+**real** validators from `dsh-compat-spec` (`src/index.js` → `validateDeclaration`,
+`src/admission-evidence.js` → `validateAdmissionEvidence`). The suites resolve them through
+`tests/helpers/spec-module.mjs`, which prefers the published package specifier
+(`dsh-compat-spec`, `dsh-compat-spec/admission-evidence` — the subpath exists in
+`dsh-compat-spec` from 2026-11-09, commit `0ea745a`) and falls back to the sibling checkout
+because this workspace does not install the package:
 
 - **Runnable example** — [`examples/diagnose/`](../../examples/diagnose/README.md): a synthetic
   `profile.yml`, `runtime-evidence.json`, `admission-evidence.json`, and the copy-paste commands
   with each command's expected exit code. The fixtures are referenced in place, so a sibling
   checkout is required. Nothing there is a host run.
 - **Wiring tests** — [`tests/diagnose-spec-wiring.test.js`](tests/diagnose-spec-wiring.test.js):
-  `main(argv, io)` against the real validators and real temp files. If the sibling checkout is
-  absent the suite fails, it does not skip.
+  `main(argv, io)` against the real validators and real temp files. If neither the package nor
+  the sibling checkout can be resolved the suite fails, it does not skip.
 - **Runner** — [`scripts/diagnose-real-wiring/`](../../scripts/diagnose-real-wiring/README.md):
   the same envelope as `diagnose-batch`, but the CLI as a real child process, one case per
   invocation — six cases, `0/0/2/1/2/2`, plus one bounded `node --test` run of the wiring file

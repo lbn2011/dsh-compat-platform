@@ -11,9 +11,10 @@
  * What is real here:
  *   - documents are read from disk by the CLI's own bounded reader, not from a
  *     fake `readFile` map;
- *   - the validators are imported from `../../../../dsh-compat-spec/src/*.js`
- *     by file URL, so the actual grammar decides validity — a stub would make
- *     these tests vacuous;
+ *   - the validators are the real `dsh-compat-spec` grammar, resolved through
+ *     `tests/helpers/spec-module.mjs` (package specifier first, the sibling
+ *     checkout second), so the actual grammar decides validity — a stub would
+ *     make these tests vacuous;
  *   - the report is assembled by the real assembler and the real combined-report
  *     builder, with no injected `build`.
  *
@@ -40,16 +41,14 @@ import { fileURLToPath } from 'node:url';
 
 import { DIAGNOSE_EXIT_CODES } from '../src/diagnose.js';
 import { main } from '../src/diagnose-cli.js';
+import { resolveSpecModule } from './helpers/spec-module.mjs';
 
 /* ------------------------------------------------------------------ *
  * Canonical grammar, resolved from this file rather than from cwd.
  * ------------------------------------------------------------------ */
 
-const DECLARATION_VALIDATOR_URL = new URL('../../../../dsh-compat-spec/src/index.js', import.meta.url);
-const ADMISSION_VALIDATOR_URL = new URL(
-  '../../../../dsh-compat-spec/src/admission-evidence.js',
-  import.meta.url,
-);
+const DECLARATION_VALIDATOR_URL = resolveSpecModule('.');
+const ADMISSION_VALIDATOR_URL = resolveSpecModule('./admission-evidence');
 
 /**
  * Import the canonical declaration grammar.
@@ -62,8 +61,8 @@ async function loadDeclarationValidator() {
   const validate = namespace?.validateDeclaration;
   if (typeof validate !== 'function') {
     throw new Error(
-      `canonical validator is unavailable: ${DECLARATION_VALIDATOR_URL.href} exports no validateDeclaration. ` +
-        'The sibling dsh-compat-spec checkout must be present next to this repository; this suite never skips.',
+      `canonical validator is unavailable: ${DECLARATION_VALIDATOR_URL.label} exports no validateDeclaration. ` +
+        'Install dsh-compat-spec, or place its checkout next to this repository; this suite never skips.',
     );
   }
   return validate;
@@ -80,8 +79,8 @@ async function loadAdmissionValidator() {
   const validate = namespace?.validateAdmissionEvidence;
   if (typeof validate !== 'function') {
     throw new Error(
-      `canonical validator is unavailable: ${ADMISSION_VALIDATOR_URL.href} exports no validateAdmissionEvidence. ` +
-        'The sibling dsh-compat-spec checkout must be present next to this repository; this suite never skips.',
+      `canonical validator is unavailable: ${ADMISSION_VALIDATOR_URL.label} exports no validateAdmissionEvidence. ` +
+        'Install dsh-compat-spec, or place its checkout next to this repository; this suite never skips.',
     );
   }
   return validate;

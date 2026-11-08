@@ -23,11 +23,12 @@
  *      `file:` URL. The document and one adapter module are written into a fresh
  *      `mkdtemp()` directory and removed afterwards; nothing is written inside the
  *      repository. The validator is the canonical `validateAdmissionEvidence`,
- *      imported by direct file URL from the sibling spec checkout, so the 0/1/2
- *      outcomes in that group are produced by the real grammar rather than a stub.
- *      If the spec checkout is absent that group FAILS: this batch requires the
- *      real canonical grammar, so a missing checkout is an error — never a skip,
- *      never a stub. There is no conditional-skip branch in this file.
+ *      resolved through `tests/helpers/spec-module.mjs` — the published package
+ *      specifier first, the sibling checkout second — so the 0/1/2 outcomes in
+ *      that group are produced by the real grammar rather than a stub.
+ *      If neither route resolves that group FAILS: this batch requires the real
+ *      canonical grammar, so a missing grammar is an error — never a skip, never
+ *      a stub. There is no conditional-skip branch in this file.
  *
  * NOT RUN as of writing: written, not executed. See README §11.
  */
@@ -42,6 +43,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMISSION_EXIT_CODES, main } from '../src/admission-cli.js';
 import { DIAGNOSTIC_CODES, WRAPPER_ISSUE_CODES } from '../src/admission-diagnostics.js';
 import { EXIT_CODES, diagnoseAdmissionEvidence } from '../src/index.js';
+import { resolveSpecModule } from './helpers/spec-module.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE = readFileSync(join(HERE, '..', 'src', 'admission-cli.js'), 'utf8');
@@ -729,7 +731,8 @@ test('the diagnostics layer is reachable from the package root without the stati
 // dynamic import are never actually exercised. These tests remove that
 // injection: the adapter/document files are created under a temporary directory
 // at run time and deleted in `finally`, and the validator is the canonical
-// `validateAdmissionEvidence` loaded from the sibling spec checkout by file URL.
+// `validateAdmissionEvidence`, resolved through `tests/helpers/spec-module.mjs`
+// (package specifier first, the sibling checkout second).
 //
 // The documents below are AUTHORED TO THE CATALOG, not recorded runs: a shape a
 // coordinator could have produced, used to make the real grammar decide. Only the
@@ -737,7 +740,7 @@ test('the diagnostics layer is reachable from the package root without the stati
 // cannot silently drift from the grammar it is meant to satisfy.
 // ---------------------------------------------------------------------------
 
-const CANONICAL_SPEC_URL = new URL('../../../../dsh-compat-spec/src/admission-evidence.js', import.meta.url);
+const CANONICAL_SPEC_URL = resolveSpecModule('./admission-evidence');
 
 /**
  * The canonical grammar. A missing or unusable checkout is a FAILURE of this
@@ -760,12 +763,12 @@ async function loadCanonicalSpec() {
       ? error.message
       : String(error);
     throw new Error(
-      `required canonical grammar could not be imported from ${CANONICAL_SPEC_URL.href}: ${detail}`,
+      `required canonical grammar could not be imported from ${CANONICAL_SPEC_URL.label}: ${detail}`,
     );
   }
   if (typeof spec.validateAdmissionEvidence !== 'function') {
     throw new Error(
-      `required canonical grammar at ${CANONICAL_SPEC_URL.href} exports no validateAdmissionEvidence()`,
+      `required canonical grammar at ${CANONICAL_SPEC_URL.label} exports no validateAdmissionEvidence()`,
     );
   }
   return spec;
