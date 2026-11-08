@@ -8,7 +8,7 @@
 >
 > **[Review status]** The recommendations below were reviewed on 2026-11-09 against the installed build; the remaining `[Pending]` items are listed in section 7 and are not decided by that review. “Trusted” means an explicitly selected execution target; it is not a sandbox guarantee or a certification.
 >
-> **[Decided 2026-11-09, after review]** The three review items were assessed against the installed build (section 9). Outcome: fixture-only first version **conditionally approved with a tighter target allowlist**; isolation policy **approved as a design, with five hard gates before the first launch**; official lifecycle observation **partially approved — a first version may report fiber state, startup errors and supervisor facts, but must not claim independent resolve/import detection**. Section 9 records the evidence and the resulting scope narrowing.
+> **[Decided 2026-11-09, after review]** The three review items were assessed against the installed build (sections 9 and 9.4). Outcome: fixture-only first version **conditionally approved with a tighter target allowlist**; isolation policy **approved as a design, with five hard gates before the first launch**; official lifecycle observation **approved, revised upward by the second pass** — `@deepseek-ai/dsh-app-boot` exports per-entry outcomes (`active` / import-failed / activation-failed / pending-for-services / disabled), so v0 reports those instead of "not observed", while still claiming no business readiness.
 
 ## 1. Requirement and scope
 
@@ -39,6 +39,8 @@ Read-only source inspection found this chain in the upstream mirror (not a claim
 **Critical pitfall:** `Entry._init()` catches an import exception, logs it and returns at lines 229–232. `Entry.init()` also attaches a catch to the fiber await at line 219. A resolved `init()` call or process exit 0 therefore does not establish successful import, activation or readiness. Log prose is not an acceptable machine-readable substitute.
 
 **Confirmed in the installed build (2026-11-09 review).** `/www/server/nodejs/v24.21.0/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/cordis-plugin-loader/lib/index.js:568-593` shows the same shape: `init()` attaches `this.fiber?.await().catch(() => {})`, and `_init()` awaits `parent.tree.import(...)` inside a `try` whose `catch` only calls `ctx.logger.error(error); return;` — so on import failure no fiber is created and no structured event is emitted. Two further constraints from the same review: `FiberState` is a `const enum` and is **not** among the runtime exports of `@deepseek-ai/cordis` (`lib/index.js:1901`), so plain JavaScript cannot import it; and `Fiber.await()` (`lib/index.js:727-731`) only drains `inertia` and rethrows `_error`, then returns the fiber — it does not imply `ACTIVE`.
+
+**But the loader is not the only surface (2026-11-09, second pass).** `@deepseek-ai/dsh-app-boot` publishes an exported, structured view of the same facts, so a failed import is recoverable **without** parsing log text: `inactiveEntries(ctx, importNow)` classifies each entry as `failed` (with `phase: 'failed to import'` and the original error recovered by `importFailure(entry)`, which re-runs `tree.import` and reads Node's module cache) or `pending` (with the list of unprovided injected service names); `captureStartupComposition(ctx)` returns up to 256 `{id, module, version, state, source, missing[]}` rows; `auditStartupEntries` raises a `StartupError` carrying those rows. See section 9.2 for line references and section 9.3 for what this changes.
 
 The mirror's extension signatures must be reconciled against the exact installed artifact before use. Private loader methods in this chain are explanatory evidence, not approved adapter APIs.
 
@@ -98,15 +100,20 @@ Any input, runtime, policy or phase change invalidates the acknowledgment. Plan 
 
 Per-phase status: proposed `not-requested | not-observed | observed | failed | interrupted`. `observed` requires a stage-specific signal; absence remains `not-observed`, including disabled entries and missing instrumentation. Store the deepest observed phase, not an invented successful suffix.
 
-**Scope narrowed by the 2026-11-09 review (see section 9).** In the installed build, `resolve` and `import` are **not independently observable**: a failed import produces a log line and no fiber, and no event distinguishes "module not found" from "not yet loaded". v0 therefore:
+**Observation surface confirmed in the installed build (2026-11-09, second pass — supersedes an earlier, narrower finding).** A first pass concluded that `resolve` and `import` could not be distinguished. That was true of the loader's own events, but `@deepseek-ai/dsh-app-boot` exports the information a supervisor needs, so v0 may report **per-entry outcomes** rather than an unqualified "not-observed". The mapping v0 should use:
 
-- reports `resolve` and `import` as `not-observed` unless a documented, supported signal is found (a private method or a log scrape does not qualify);
-- does **not** claim import success from a resolved `init()`, from exit 0, or from the target's own marker;
-- may report `activate` from an observed `internal/status` transition to `ACTIVE` for a fiber it can associate with the selected entry, and `failed` when `Fiber.await()` rejects or the fiber settles in `FAILED`;
-- may report `cleanup` from supervisor termination and process-tree readback;
-- records `settle` only when the fixture declares a checkable readiness condition **and** that condition is evaluated by the supervisor, not self-reported by the target.
+| Reported observation | Source (exported) | Not claimed |
+| --- | --- | --- |
+| selected entry reached `active` | `captureStartupComposition(ctx)` row `state === 'active'`, cross-checked with an observed `internal/status` transition | services the plugin needs are obtainable outside the isolated environment |
+| entry's module never loaded (import failed) | `inactiveEntries(ctx)` outcome `kind:'failed'` with `phase:'failed to import'`; original error via `importFailure(entry)` | why the module failed beyond the recorded error classification |
+| entry loaded but not activated | outcome `kind:'failed'` with a fiber error from `fiber.await()` | business readiness |
+| entry waiting for services | outcome `kind:'pending'` with `missing[]` names | whether those services exist anywhere in the real profile |
+| entry intentionally disabled | `pluginState` state `'disabled'` | whether disabling was intended |
+| root reached ready | `ctx.fiber.state === 2 && ctx.get('loader') !== undefined` (as `runProfile` checks before `appReady.commit()`) | that every entry is healthy |
 
-Because `FiberState` is a `const enum` absent from the runtime export list, the adapter must compare the numeric state it reads from `fiber.state` against named constants it defines itself, and must refuse rather than guess if the shape is unexpected.
+Three consequences for the receipt: the per-entry `state`/`outcome` words are a closed set (`pending | loading | active | failed | disposed | unloading | disabled`, plus `kind: 'failed' | 'pending'`), so they can be projected text-free; the error object must never be published (it carries paths and possibly config); and `missing[]` service names are identity data subject to the D-A decision, so the public projection keeps only their count unless identity is explicitly opted in.
+
+Because `FiberState` is a `const enum` absent from the runtime export list, the adapter must compare the numeric state it reads against constants it defines itself, and must refuse rather than guess if the shape is unexpected. `Loader.await()` drains pending work with `Promise.allSettled` (`cordis-plugin-loader/lib/index.js:229-236`), so a resolved await means "settled", never "succeeded".
 
 **[Pending — recommended]** v0 requests isolated fixture profile execution and observes only the lifecycle facts supported by a reviewed adapter. Independent resolve-only/import-only modes remain unavailable unless the official surface actually separates them. Reject unsupported phase combinations before launch rather than execute a deeper phase to answer a shallower question.
 
@@ -152,6 +159,7 @@ Proposed receipt version: `trusted-extraction-receipt/0.1-draft.1`. No existing 
 | `process` | Exit code or signal, mutually exclusive where observed; timeout separate; no fabricated zero |
 | `capture` | Actual byte counts and completeness per stream; no content in public summary |
 | `phases` | Fixed ordered records with status, observer source and closed reason code |
+| `entries` | Per-entry outcomes from the exported settlement snapshot: closed state word, required flag, omission counts; identity fields (`id`, `module`, `version`, `source`, `missing[]` names) stay private |
 | `cleanup` | Supervisor termination/readback; unknown or residual processes prevent a green verdict |
 | `certification` | Literal false |
 | `correlation` | Literal `not-established` |
@@ -196,8 +204,8 @@ Keep the executor out of analyzer imports and existing CLI code paths. Inert sum
 | --- | --- |
 | Separate code-executing path from inert analyzers | **[Decided]** Direction accepted; this document does not authorize execution |
 | First target scope | **[Decided 2026-11-09]** Synthetic fixtures only, fixed allowlist with a per-fixture manifest; no arbitrary profile path, package name or command. Conditional on the isolation gates below. |
-| Launch mechanism | **[Pending]** Official DSH profile path; the installed `dsh` is `0.2.2-rc.1`, but the Cordis copy it resolves must be pinned first (two versions are present on this host: 4.0.5 global, 4.1.0 inside the DSH installation). |
-| Phase independence | **[Narrowed 2026-11-09]** `resolve`/`import` are not independently observable in the installed build, so v0 reports them `not-observed` and claims no import success. |
+| Launch mechanism | **[Pending]** Official DSH profile path. Runtime pin resolved 2026-11-09: launching through `@deepseek-ai/dsh` resolves the nested `@deepseek-ai/cordis` **4.1.0** and `@deepseek-ai/cordis-plugin-loader` **1.1.0**, not the global `4.0.5`. |
+| Phase independence | **[Revised 2026-11-09]** `resolve`/`import` are not separate *phases*, but per-entry outcomes are exported (`inactiveEntries`, `captureStartupComposition`), so v0 reports entry-level words plus the `prepare`-time observer instead of a four-phase sequence. |
 | Isolation policy | **[Conditionally approved]** Minimal mounts + unprivileged identity + no network; the five hard gates in §4.3 must be demonstrated before the first launch, and refusal — not degradation — is the failure mode. |
 | Public disclosure | **[Pending]** Text-free projection; private identity and raw captures. |
 | Integration into diagnose/GUI | **[Pending]** Defer; new standalone receipt first. |
@@ -240,7 +248,7 @@ Review of the three requested items — fixture-only first version, isolation po
 | --- | --- | --- |
 | Fixture-only first version | **Conditionally approved** | Right size, but it needs a fixed per-fixture allowlist with hashed inputs, per-scenario staged acceptance, and no "fixture-only" exemption from resource limits — a timing-out or output-flooding fixture still affects the host. |
 | Isolation policy | **Design approved, implementation not yet demonstrated** | The design already refuses host-root binds and requires separate home/env/netns; it lacks the five concrete gates now listed in §4.3. Confinement remains defense in depth, not a hostile-code sandbox. |
-| Official lifecycle observation | **Partially approved** | `internal/status` and `Fiber.state` exist and are supported-looking; `Fiber.await()` is available but does not mean `ACTIVE`; import failure produces no fiber and no event. Independent `resolve`/`import` claims must be dropped from v0. |
+| Official lifecycle observation | **Approved (revised upward in §9.4)** | `internal/status` and `Fiber.state` exist and are supported-looking; `Fiber.await()` does not mean `ACTIVE`; a failed import produces no fiber. However `@deepseek-ai/dsh-app-boot` exports `inactiveEntries`, `captureStartupComposition` and `auditStartupEntries`, which report per-entry outcomes including "failed to import" and "pending for services" without log scraping — so v0 reports entry outcomes, not four phases. |
 
 ### 9.2 Evidence read during the review
 
@@ -256,10 +264,27 @@ Review of the three requested items — fixture-only first version, isolation po
 
 ### 9.3 Consequences for the next task
 
-1. Pin the runtime: record which Cordis/loader copy the official profile launch path actually resolves, with version and artifact hash, before any adapter code is written.
-2. Establish, and document, a supported way to register the observer **before** the selected entry starts, plus how an observer associates an `internal/status` event with the selected entry's fiber. If no supported association exists, v0 must report `not-observed` rather than guess.
+1. Pin the runtime: record which Cordis/loader copy the official profile launch path actually resolves, with version and artifact hash, before any adapter code is written. **Done for version selection: launching through `@deepseek-ai/dsh` resolves `@deepseek-ai/cordis` 4.1.0 and `@deepseek-ai/cordis-plugin-loader` 1.1.0 from the installation's nested `node_modules`; the global 4.0.5 is not what the CLI uses.** Artifact hashes and a recorded resolution receipt remain to be produced.
+2. Establish, and document, a supported way to register the observer **before** the selected entry starts, plus how an observer associates an `internal/status` event with the selected entry's fiber. **Resolved in §9.4: `boot()` runs its `prepare` callback after `ctx.plugin(Loader)` and before `mountRootInclude`, and `loader.locate(fiber)` maps a fiber back to its entry id.**
 3. Turn §4.3's five gates into checks that fail closed, and demonstrate them with non-sensitive sentinels before the first fixture launch.
 4. Do not start loader execution until steps 1–3 are done. A tool that runs but cannot say what it observed is worse than no tool.
+
+### 9.4 Second pass: the exported entry-outcome surface (2026-11-09)
+
+A targeted read of `@deepseek-ai/dsh-app-boot` (version `0.2.2-rc.1`, `lib/index.js`) found that the loader's swallowed exception is **recoverable through exported functions**, which changes the lifecycle verdict.
+
+| Capability | Implementation | Consequence for the design |
+| --- | --- | --- |
+| Observer registration before entries mount | `boot(binName, absoluteConfigPath, patches, prepare, bareModuleBaseUrl)` at `:5259`: `new Context()` → `ctx.plugin(Loader)` → `await prepare?.(ctx)` → `mountRootInclude(...)`. JSDoc: "optional host setup run after Loader installation and before any config-tree entry mounts". | A controlled launcher can pass its own `prepare` that registers the observer, then mounts `PluginPackages`; no private API and no race with entry startup. |
+| Per-entry state vocabulary | `stateName()` maps `0..5` to `pending/loading/active/failed/disposed/unloading`; `pluginState()` adds `disabled` and returns `{id, module, version, state, source, missing[]}` (missing only while `pending`). | Closed words suitable for a text-free projection; `id`/`module`/`version`/`source` are identity data and stay private by default. |
+| Bulk snapshot | `captureStartupComposition(ctx)` returns `{plugins[≤256], services[≤256], omittedPlugins, omittedServices}`; rows are sorted with active last. | One call gives the whole tree's state plus service-ownership observations; omission counts must be surfaced, never silently dropped. |
+| Failure classification | `inactiveEntries(ctx, importNow)` yields `kind:'failed'` with `phase:'failed to import'` or a fiber error, and `kind:'pending'` with `missing[]`. | Distinguishes "module never imported" from "imported but not activated" from "waiting for services" — the distinction an earlier pass thought impossible. |
+| Original import error | `importFailure(entry)` re-runs `entry.parent.tree.import(...)` and returns the cached rejection. | The supervisor can classify the failure privately; the error text must never be published. |
+| Startup policy result | `auditStartupEntries(ctx, binName, warn)` throws `StartupError` with `{id, module, required, fiberState, outcome}` per failure, and warns about optional ones. | Gives a policy-level verdict (required entries) separate from the per-entry snapshot. |
+| Loader settlement semantics | `Loader.await()` at `cordis-plugin-loader/lib/index.js:229-236` drains `getTasks()` with `Promise.allSettled`; `getTasks()` returns `entry._initTask || entry.fiber?.inertia`. | A resolved await means settled, never succeeded — the receipt must not translate it into success. |
+| Overlay insertion of the observer | `loadOverlayPatches(binName, file)` parses a `--patch` YAML list of id-targeted overrides and `insert` lists, path-anchoring relative names; a missing named overlay throws. | A second supported route: mount the observer as an inserted entry via an official overlay file instead of the `prepare` hook. |
+
+**Limits that remain.** These are post-settle snapshots and policy checks, not per-phase timestamps; v0 must state "state observed at settlement", not "phase order observed". `pluginState` reads `entry.fiber?.state`, `entry.disabled` and `entry.options.*` — loader internals, so the adapter needs a version pin and a shape check, and must refuse if a future build changes them. `captureStartupComposition` caps rows at 256 with omission counts. None of this proves business readiness, and none of it replaces the isolation gates.
 
 ## Appendix A. File and line quick reference
 
