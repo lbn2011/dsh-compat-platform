@@ -1,0 +1,7 @@
+{
+  "declarations": [
+    {
+      "plugin": { "id": "trailing-comma", "version": "1.0.0" },
+    }
+  ]
+}

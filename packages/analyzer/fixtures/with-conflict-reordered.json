@@ -1,0 +1,78 @@
+{
+  "declarations": [
+    {
+      "schemaVersion": "0.1.0-draft.1",
+      "plugin": {
+        "id": "dashboard",
+        "version": "0.1.0"
+      },
+      "capabilities": {
+        "required": [
+          "svc:metrics"
+        ],
+        "optional": [
+          "svc:cache"
+        ]
+      },
+      "resources": []
+    },
+    {
+      "schemaVersion": "0.1.0-draft.1",
+      "plugin": {
+        "id": "store-a",
+        "version": "2.0.0"
+      },
+      "capabilities": {
+        "required": [
+          "svc:redis"
+        ],
+        "optional": []
+      },
+      "resources": [
+        {
+          "kind": "service",
+          "name": "store",
+          "scope": "shared"
+        }
+      ]
+    },
+    {
+      "schemaVersion": "0.1.0-draft.1",
+      "plugin": {
+        "id": "store-b",
+        "version": "1.0.0"
+      },
+      "capabilities": {
+        "required": [],
+        "optional": []
+      },
+      "resources": []
+    },
+    {
+      "schemaVersion": "0.1.0-draft.1",
+      "plugin": {
+        "id": "store-b",
+        "version": "2.0.1"
+      },
+      "capabilities": {
+        "required": [
+          "svc:redis"
+        ],
+        "optional": [
+          "svc:cache"
+        ]
+      },
+      "resources": [
+        {
+          "kind": "service",
+          "name": "store",
+          "scope": "shared"
+        }
+      ]
+    }
+  ],
+  "availableCapabilities": [
+    "svc:metrics",
+    "svc:metrics"
+  ]
+}

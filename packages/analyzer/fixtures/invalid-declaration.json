@@ -1,0 +1,17 @@
+{
+  "declarations": [
+    {
+      "schemaVersion": "0.1.0-draft.1",
+      "plugin": { "id": "good", "version": "1.0.0" },
+      "capabilities": { "required": [], "optional": [] },
+      "resources": [{ "kind": "tool", "name": "fine", "scope": "plugin" }]
+    },
+    {
+      "schemaVersion": "0.1.0-draft.1",
+      "plugin": { "id": "broken-scope", "version": "1.0.0" },
+      "capabilities": { "required": [], "optional": [] },
+      "resources": [{ "kind": "tool", "name": "x", "scope": " everywhere " }]
+    }
+  ],
+  "availableCapabilities": []
+}

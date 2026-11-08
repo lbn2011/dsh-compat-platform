@@ -1,0 +1,17 @@
+{
+  "declarations": [
+    {
+      "schemaVersion": "0.1.0-draft.1",
+      "plugin": { "id": "alpha", "version": "1.0.0" },
+      "capabilities": { "required": [], "optional": ["svc:cache"] },
+      "resources": []
+    },
+    {
+      "schemaVersion": "0.1.0-draft.1",
+      "plugin": { "id": "beta", "version": "1.0.0" },
+      "capabilities": { "required": [], "optional": ["svc:cache"] },
+      "resources": []
+    }
+  ],
+  "availableCapabilities": []
+}

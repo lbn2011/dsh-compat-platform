@@ -1,0 +1,20 @@
+{
+  "declarations": [
+    {
+      "schemaVersion": "0.1.0-draft.1",
+      "plugin": { "id": "scope-a", "version": "1.0.0" },
+      "capabilities": { "required": [], "optional": [] },
+      "resources": [{ "kind": "service", "name": "bus", "scope": "tenant:acme" }]
+    },
+    {
+      "schemaVersion": "0.1.0-draft.1",
+      "plugin": { "id": "scope-b", "version": "1.0.0" },
+      "capabilities": { "required": [], "optional": [] },
+      "resources": [
+        { "kind": "service", "name": "bus", "scope": "tenant:globex" },
+        { "kind": "tool", "name": "panel", "scope": "everywhere" }
+      ]
+    }
+  ],
+  "availableCapabilities": []
+}

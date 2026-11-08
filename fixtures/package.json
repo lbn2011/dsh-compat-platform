@@ -1,0 +1,6 @@
+{
+  "name": "dsh-compat-platform-fixtures",
+  "private": true,
+  "type": "module",
+  "description": "Text-only fixtures for the static analyzer. Never treated as executable plugin code."
+}

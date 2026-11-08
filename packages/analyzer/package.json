@@ -1,0 +1,48 @@
+{
+  "name": "dsh-compat-platform",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Static declaration analysis without executing analyzed plugins. Pure library plus CLI with an explicitly selected trusted validator.",
+  "engines": {
+    "node": ">=24.9.0"
+  },
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "bin": {
+    "dsh-compat-analyze": "./src/cli.js",
+    "dsh-compat-admission": "./src/admission-cli.js",
+    "dsh-compat-report": "./src/combined-cli.js",
+    "dsh-compat-compare": "./src/compare-cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./admission-diagnostics": {
+      "types": "./src/admission-diagnostics.d.ts",
+      "default": "./src/admission-diagnostics.js"
+    },
+    "./admission-cli": "./src/admission-cli.js",
+    "./combined-report": {
+      "types": "./src/combined-report.d.ts",
+      "default": "./src/combined-report.js"
+    },
+    "./combined-cli": "./src/combined-cli.js",
+    "./snapshot-diff": {
+      "types": "./src/snapshot-diff.d.ts",
+      "default": "./src/snapshot-diff.js"
+    },
+    "./compare-cli": "./src/compare-cli.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test --test-concurrency=1 \"tests/*.test.js\" \"tests/*.test.mjs\""
+  },
+  "dependencies": {}
+}

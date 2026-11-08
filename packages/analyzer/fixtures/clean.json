@@ -1,0 +1,20 @@
+{
+  "declarations": [
+    {
+      "schemaVersion": "0.1.0-draft.1",
+      "plugin": { "id": "catalog-core", "version": "1.2.0" },
+      "capabilities": { "required": [], "optional": ["svc:telemetry"] },
+      "resources": [
+        { "kind": "service", "name": "catalog", "scope": "shared" },
+        { "kind": "tool", "name": "catalog.search", "scope": "plugin" }
+      ]
+    },
+    {
+      "schemaVersion": "0.1.0-draft.1",
+      "plugin": { "id": "catalog-ui", "version": "0.9.1" },
+      "capabilities": { "required": ["svc:catalog"], "optional": [] },
+      "resources": [{ "kind": "tool", "name": "catalog.open", "scope": "plugin" }]
+    }
+  ],
+  "availableCapabilities": ["svc:catalog"]
+}
