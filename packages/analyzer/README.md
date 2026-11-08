@@ -697,7 +697,7 @@ error becomes `PARSE_ERROR` (exit `2`), and a stream warning becomes `UNEXPECTED
 
 ```json
 {
-  "profileDumpSummary": "profile-dump-summary/0.1-draft.1",
+  "profileDumpSummary": "profile-dump-summary/0.2-draft.1",
   "input": { "bytes": 812, "lines": 23 },
   "documents": 1,
   "inventory": "present",
@@ -707,15 +707,54 @@ error becomes `PARSE_ERROR` (exit `2`), and a stream warning becomes `UNEXPECTED
     "entriesWithId": 2, "entriesWithName": 2, "entriesWithConfig": 2, "entriesDisabled": 0,
     "jsScalars": 2, "distinctTags": 2, "nodes": 14, "scalars": 11, "maxDepth": 4
   },
+  "rows": [
+    { "index": 1, "line": 2, "keyCount": 3, "idKind": "string", "nameKind": "string",
+      "group": "absent", "disabled": "absent", "config": "mapping",
+      "configKeyCount": 2, "unmodelledKeyCount": 0 },
+    { "index": 2, "line": 9, "keyCount": 4, "idKind": "string", "nameKind": "string",
+      "group": "false", "disabled": "true", "config": "mapping",
+      "configKeyCount": 1, "unmodelledKeyCount": 1 }
+  ],
+  "rowsTruncated": false,
   "limits": { "maxBytes": 1048576, "maxLines": 20000, "maxDepth": 32,
-              "maxNodes": 20000, "maxEntries": 5000, "maxDiagnostics": 64 },
+              "maxNodes": 20000, "maxEntries": 5000, "maxDiagnostics": 64, "maxRows": 64 },
   "diagnostics": [ { "ordinal": 2, "code": "JS_EXPRESSION_NOT_EVALUATED", "line": 9, "detail": null } ],
   "diagnosticsTruncated": false,
   "completeness": "unknown",
   "runtimeValidation": "not-performed",
-  "certification": false
+  "certification": false,
+  "notDerived": ["declarations", "availableCapabilities", "resources", "activation", "loadability"],
+  "limitations": [
+    "ROW_IS_NOT_A_DECLARATION", "ROW_SET_COMPLETENESS_UNKNOWN",
+    "NO_DEPENDENCY_CLOSURE_ESTABLISHED", "NO_LOADABILITY_OR_ACTIVATION_OBSERVED",
+    "ROW_SKIPS_UNMODELLED_KEYS", "CONFIG_VALUES_NOT_INSPECTED",
+    "CERTIFICATION_NOT_CLAIMED", "INPUT_IS_PARSED_TEXT_NOT_A_SANDBOX"
+  ]
 }
 ```
+
+`rows` is a **capped display window** over `counts.entries`, not a second inventory:
+`counts.entries` stays authoritative, `rows` holds at most `maxRows` (64) of them, and
+`rowsTruncated` says when the window is short. `rows` is `null` exactly where `counts` is `null`,
+so a refused document never looks like a document with no entries.
+
+Each row carries **position, line, and closed words only**: `index` (1-based), `line`, `keyCount`,
+`idKind` / `nameKind` (`absent` | `string` | `non-string`), `group` / `disabled`
+(`absent` | `true` | `false` | `null` | `other`), `config` (`absent` | `mapping` | `not-mapping`),
+`configKeyCount` (only when `config` is a mapping, `null` otherwise) and `unmodelledKeyCount`.
+The pairs are kept apart on purpose: `disabled: "false"` is a setting, `disabled: "null"` is the
+legal "not set" form `EntryOptions` declares (`boolean | null`,
+`vendor/loader/src/config/entry.ts:8-24`), `disabled: "other"` is a value this reader did not
+model, and collapsing them into one boolean would make a legal form, a setting and a typo
+indistinguishable. `config` key names are **counted, never copied** — the
+same rule the diagnostics already follow — so `plugin.id` inside a `config` block stays arbitrary
+text and is never read as a pointer to anything.
+
+`notDerived` and `limitations` are the guards on that window. The five `notDerived` names are
+copied verbatim from the accepted export observation record
+(`NOT_DERIVED`, `experiments/profile-export-fixture/observation.mjs`); `limitations` is a fixed
+list shaped like `COMBINED_REPORT_LIMITATIONS`. Both are **per-summary copies**, so a consumer may
+adapt its own copy without editing what the next consumer sees.
 
 **No document content is ever emitted.** No id, name, origin label, `# ==` text, configuration
 key, value, `!!js` expression text, path or parser message appears in any field. `distinctTags`
@@ -726,8 +765,8 @@ the tag itself. A local tag (`!SECRET_TAG`) or a verbatim tag (`!<https://…>`)
 inside the document, so it is classified, not quoted. Parser messages are never read:
 `YAMLError.message` is assembled together with a source excerpt, so only `code` and `pos` are used.
 
-A refusal returns the same envelope with `"inventory": "none"` and `"counts": null`, so a partial
-walk can never be mistaken for a complete inventory.
+A refusal returns the same envelope with `"inventory": "none"`, `"counts": null` and
+`"rows": null`, so a partial walk can never be mistaken for a complete inventory.
 
 ### 12.3 What is checked, and what deliberately is not
 
@@ -772,8 +811,10 @@ fine, look at row 7".
 ### 12.5 Limits, and what they do not bound
 
 `maxBytes` (1048576) and `maxLines` (20000) act **before** parsing. `maxDepth` (32),
-`maxNodes` (20000), `maxEntries` (5000) and `maxDiagnostics` (64) act **after** parsing, during
-the walk — they bound what this command will *describe*, not what the parser will consume.
+`maxNodes` (20000), `maxEntries` (5000), `maxDiagnostics` (64) and `maxRows` (64) act **after**
+parsing, during the walk — they bound what this command will *describe*, not what the parser will
+consume. `maxRows` caps the row window only; `counts.entries` still reports the full count and
+`rowsTruncated` marks the window.
 `yaml@2.9.1` has no parse-time depth option. Its `RESOURCE_EXHAUSTION` recovery wraps the compose
 recursion only (`src/compose/compose-node.ts`); a `RangeError` that escapes is caught and reported
 as `RESOURCE_EXHAUSTION_UNCAUGHT`. These are recovery paths, **not guarantees** that the process
@@ -791,12 +832,19 @@ returns a partial walk as if it were complete (`counts` is `null`, `inventory` i
 - what any `!!js` expression evaluates to — it is never evaluated and never emitted;
 - that the dump is complete, authoritative, or produced by a particular host version;
 - anything about provenance, authentication or certification;
-- that a clean summary means the profile is healthy. `completeness` is always `"unknown"`.
+- that a clean summary means the profile is healthy. `completeness` is always `"unknown"`;
+- that `rows` is the row set. It is a capped window over the counters, and the row set's own
+  completeness cannot be established from a dump: denied bundles contribute no row and skipped
+  bundles arrive as free-form stderr (`limitations`: `ROW_SET_COMPLETENESS_UNKNOWN`);
+- that a row is a declaration, or that `config` holds declarations. A row is shape facts about a
+  dump line (`limitations`: `ROW_IS_NOT_A_DECLARATION`, `ROW_SKIPS_UNMODELLED_KEYS`), and the
+  `notDerived` list names what no consumer may read out of it.
 
 ### 12.7 Verification status
 
-- **The authorized second isolated run under Node 24 passed: this lane's single test file
-  `tests/profile-dump.test.js` passes `65/65`, `0` fail.** That is **one file**, not the whole
+- **The authorized second isolated run under Node 24 passed: on the `0.1-draft.1` bytes, this
+  lane's single test file `tests/profile-dump.test.js` passed `65/65`, `0` fail.** That is **one
+  file**, not the whole
   suite, and it is not host integration, cross-version or packaging certification. `yaml@2.9.1`
   ran under Node 24 for this file only. The record is
   [`docs/testing/2026-11-08-profile-dump.md`](../../docs/testing/2026-11-08-profile-dump.md).
@@ -809,10 +857,17 @@ returns a partial walk as if it were complete (`counts` is `null`, `inventory` i
   was run once per sample against three historical `stdout.bin` captures — `333`, `162` and
   `568` bytes — produced earlier by a real CLI over a synthetic fixture home. All three
   reproduced the pre-fixed summary shape and counters: exit `0`, empty stderr, `verdict=pass`,
-  `3/3`. This is not a re-export on this host, adds **no** test cases (`65/65` above is
-  unchanged and these three samples are not "68 tests"), and says nothing about export
+  `3/3`. This is not a re-export on this host, adds **no** test cases (`65/65`, the count for
+  those bytes, is unchanged and these three samples are not "68 tests"), and says nothing about export
   completeness, plugin loadability or hostile hosts. The record is
   [`docs/testing/2026-11-08-profile-dump-retained-export.md`](../../docs/testing/2026-11-08-profile-dump-retained-export.md).
+- **The `0.2-draft.1` shape was verified twice on 2026-11-09, both bounded and under the same
+  envelope:** this lane's single test file passed `78/78` (`0` fail), and the same three retained
+  captures were replayed against the row-carrying shape, `3/3`, `verdict=pass`. The `78/78` figure
+  supersedes `65/65` only as *the count for the current bytes*: the tests added are the row-window
+  and guard-list cases, and the earlier runs are neither retracted nor merged into this one. Still
+  one file, still not the whole suite. Record:
+  [`docs/testing/2026-11-08-profile-dump-rows.md`](../../docs/testing/2026-11-08-profile-dump-rows.md).
 - **Boundaries still pending:** a fresh host-export-to-diagnostic run, production-scale profile
   coverage, hostile-host behavior, cross-Node-version behavior, and host compatibility. Non-UTF-8 and over-limit files
   were tested through the CLI's imported `main`; only the valid-file case also exercised a real
@@ -979,8 +1034,9 @@ is no separate "bad report" exit code. It is a shape check, not a provenance or 
   assembler option key) was found by static reading and corrected **before** the first run. The
   defective form was never executed anywhere, so no artifact shows it or the failure it would
   have produced; what the wiring case establishes is the current mapping only.
-- **The modules it orchestrates do have their own records:** the profile summarizer is `65/65`
-  (§12.7) and the combined report has its own bounded acceptance (§ above). Those records do not
+- **The modules it orchestrates do have their own records:** the profile summarizer is `78/78` on
+  its current `0.2-draft.1` bytes and `65/65` on the earlier shape (§12.7), and the combined
+  report has its own bounded acceptance (§ above). Those records do not
   transfer: they say nothing about this file's control flow, its exit mapping or its tests.
 - **Scope of the 49/49 — deliberately narrow.** The cases drive `main(argv, io)` in-process with
   injected sinks and real temporary files, and load a **synthetic** validator module by absolute

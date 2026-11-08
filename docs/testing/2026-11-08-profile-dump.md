@@ -7,6 +7,13 @@ them — and the MiB conversions shown in parentheses (e.g. `32501760` B ≈ `30
 `95178752` B ≈ `90.7` MiB, `97046528` B ≈ `92.6` MiB; `MiB = bytes / 1048576`) — is a
 reviewer's explanation, not machine output.
 
+> **Later shape change (2026-11-09).** The module has since moved to
+> `profile-dump-summary/0.2-draft.1`, which adds `rows`, `rowsTruncated`, `notDerived`,
+> `limitations` and the `maxRows` limit. The `65/65` below is the count for the **0.1-draft.1**
+> bytes that ran; the current bytes were verified separately in
+> [`2026-11-08-profile-dump-rows.md`](./2026-11-08-profile-dump-rows.md) (`78/78`). Neither
+> record is retracted and the two counts are not additive.
+
 **Scope caveat.** The acceptance batch runs a **single** test file
 (`tests/profile-dump.test.js`) — not the full analyzer suite — under an isolated
 `systemd-run` envelope with `bwrap` namespace isolation. It does **not** verify

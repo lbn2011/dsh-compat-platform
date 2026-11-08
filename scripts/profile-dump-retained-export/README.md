@@ -1,14 +1,24 @@
 # profile-dump-retained-export
 
-**STATUS: EXECUTED ONCE, PASS, FROZEN.** One bounded run took place on 2026-11-08 under the
-reviewed envelope and returned `verdict=pass` for all three samples
-(`retained-export-result.txt`: `samples_verified=3`, `child_runs=3`, `first_failure=none`).
-The record is
-[`docs/testing/2026-11-08-profile-dump-retained-export.md`](../../docs/testing/2026-11-08-profile-dump-retained-export.md),
-which lists the executed bytes. The three scripts stay byte-frozen at those hashes; that
-single pass is not an authorization to rerun them, and the sections below were written for
-review beforehand — read them as the design this run exercised, not as a fresh claim of new
-behaviour.
+**STATUS: EXECUTED TWICE, PASS EACH TIME (2026-11-08 and 2026-11-09).**
+
+- **2026-11-08 — the `0.1-draft.1` shape.** One bounded run returned `verdict=pass` for all three
+  samples (`samples_verified=3`, `child_runs=3`, `first_failure=none`) on verifier bytes
+  `run.sh ca15a603… / payload.sh 53c2661d… / retained-export.mjs 007a6729…`. Record:
+  [`docs/testing/2026-11-08-profile-dump-retained-export.md`](../../docs/testing/2026-11-08-profile-dump-retained-export.md).
+- **2026-11-09 — the `0.2-draft.1` shape.** The summariser grew `rows`, `rowsTruncated`,
+  `notDerived`, `limitations` and the `maxRows` limit, so this verifier — which pins the published
+  shape, including closed row key sets, row vocabularies, exact limit values and both guard lists —
+  had to move with it, and was re-executed once against the same three captures: again
+  `samples_verified=3`, `child_runs=3`, `first_failure=none`, exit `0`, empty stderr per sample,
+  `memory_peak=32686080` B, terminal `MainPID=0`. Verifier bytes for that run:
+  `run.sh ca15a603… / payload.sh 53c2661d… / retained-export.mjs 06257f01…`. Record:
+  [`docs/testing/2026-11-08-profile-dump-rows.md`](../../docs/testing/2026-11-08-profile-dump-rows.md).
+
+Neither pass is an authorization to rerun without a separate review, and neither is a re-export:
+the three input captures are unchanged, byte for byte, in both runs. The sections below describe
+the design both runs exercised; where a section names `0.1-draft.1` it is describing the earlier
+shape, and §5 states the current one.
 
 One question, asked once:
 
@@ -117,6 +127,12 @@ Fixed in advance, from the CLI's own contract and from the fixture sources.
 Every sample must also report `diagnosticsTruncated: false`, `completeness: "unknown"`,
 `runtimeValidation: "not-performed"`, `certification: false`, and a non-null `counts`.
 
+Rows on these three captures, from the `0.2-draft.1` shape: `rows.length` must equal
+`counts.entries` (1 / 1 / 2) and `rowsTruncated` must be `false`. That is an expectation here
+because every sample is far below `maxRows`; a truncated window on a three-entry sample would
+mean the cap itself moved. The row *contents* are not pinned to golden values: what is asserted is
+their shape and position (§5), not that entry 1 in `probe` has any particular `configKeyCount`.
+
 ### Where each expectation comes from
 
 | expectation | source |
@@ -154,9 +170,32 @@ for `inventory`, `root`, `completeness`, `runtimeValidation`, diagnostic `code` 
 `JS_EXPRESSION_NOT_EVALUATED` diagnostics specifically, `detail` must be `null`, `ordinal`
 must also be `null` — `pushDiagnostic(code, { line })` passes only a line, so a numeric
 ordinal would be a different diagnostic shape — and `line` must be a positive integer
-within `input.lines`; the six `limits` constants against their exact contract values; the
-fixed counters in §4; empty stderr; exit 0. The first failing sample ends the batch: no
-later child starts, and `child_runs` records what actually ran.
+within `input.lines`; the seven `limits` constants (including `maxRows`) against their exact
+contract values; the fixed counters in §4; empty stderr; exit 0. The first failing sample ends the
+batch: no later child starts, and `child_runs` records what actually ran.
+
+**Asserted about rows** — the part that keeps a window from becoming an inventory:
+
+- `rows` is an array or `null`, never anything else; it is `null` **exactly** when `counts` is
+  `null`, and `rowsTruncated` is `false` whenever `rows` is `null`.
+- `rows.length` is never greater than `limits.maxRows`, and `rowsTruncated` equals
+  `rows.length < counts.entries` in **both** directions: a short window without the flag would
+  hide rows silently, and the flag without a short window would claim a loss that did not happen.
+- Every row has exactly the ten documented keys, in a closed set — a row that grew an `id`,
+  `name` or `config` key holding document text would be rejected here, which is the check that
+  keeps operator content out of the public projection.
+- `index` is its own 1-based position in the array (the window is the head of the sequence, in
+  order), `line` is `null` or a positive integer, `keyCount` and `unmodelledKeyCount` are
+  non-negative integers, and `unmodelledKeyCount ≤ keyCount`.
+- `idKind` / `nameKind` ∈ `absent|string|non-string`; `group` / `disabled` ∈
+  `absent|true|false|null|other`; `config` ∈ `absent|mapping|not-mapping`. `null` and `other` are
+  distinct words because `EntryOptions` declares `group`/`disabled` as `boolean | null`, so a
+  legal `null` must not be reported as a type error.
+- `configKeyCount` is a non-negative integer **exactly when** `config` is `mapping`, and `null`
+  otherwise.
+- `notDerived` and `limitations` are compared **exactly** against the five verbatim names and the
+  eight fixed codes. A reworded limitation or a silently dropped name fails the run rather than
+  drifting.
 
 That JS-diagnostic check is a **shape** check only: it does not verify which entry a `!!js`
 tag belongs to, so no entry attribution is claimed.
@@ -169,9 +208,13 @@ tag belongs to, so no entry attribution is claimed.
 - **No golden values for the other counters.** `entryGroups`, `entriesWithId`,
   `entriesWithName`, `entriesWithConfig`, `entriesDisabled`, `distinctTags`, `nodes`,
   `scalars`, `maxDepth` are only checked to be finite non-negative integers — except that
-  `limits` is *not* in this group (§5: those six are contract constants and are compared
+  `limits` is *not* in this group (§5: those seven are contract constants and are compared
   exactly). Inferring golden counter values from three small samples would be a guess
   dressed as a contract.
+- **Golden row contents.** `line`, `keyCount`, `configKeyCount` and `unmodelledKeyCount` are
+  checked for type and coupling, not against per-sample golden numbers: the fixture provenance
+  for those values is recorded in §4, but the verifier asserts shape and position, so a change in
+  the fixture would not silently pass as a shape change.
 - **Tag equivalence.** Nothing claims that an untagged or quoted scalar is treated like a
   `!!js` one. A plain or quoted scalar with no tag is never counted as an expression.
 
@@ -353,8 +396,8 @@ identical before and after.
 **What it did not establish.** Nothing about export completeness, plugin loadability,
 host compatibility, hostile hosts, or the failure paths. The three samples are historical
 captures of a real CLI over a synthetic fixture, replayed — not a re-export on this host.
-The CLI's own suite stays at `65/65` in its own record; these three samples are not extra
-test cases. A plain clone cannot re-verify: the inputs live only under
+The CLI's own suite has its own record — `78/78` on the current `0.2-draft.1` bytes, `65/65` on
+the earlier shape; these three samples are not extra test cases. A plain clone cannot re-verify: the inputs live only under
 `/data/dsh-ecosystem-test-artifacts` and the run directory is not published.
 
 Any further execution needs a separate authorisation. The batch that passed is not a standing

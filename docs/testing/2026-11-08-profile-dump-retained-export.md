@@ -8,6 +8,14 @@ The numeric fields below are transcribed from the run artifacts listed in §9; t
 conversions in parentheses (`MiB = bytes / 1048576`) and the connecting prose are a
 reviewer's explanation, not machine output.
 
+> **Later shape change (2026-11-09).** The verifier that pins the summary shape moved to
+> `profile-dump-summary/0.2-draft.1` and was re-executed against the same three retained
+> captures, again `3/3`. This record still describes the **0.1-draft.1** replay and keeps its
+> own hashes (`retained-export.mjs` was `007a6729…` here, `06257f01…` in the later run). The
+> later run is recorded in
+> [`2026-11-08-profile-dump-rows.md`](./2026-11-08-profile-dump-rows.md); it does not revise
+> anything below.
+
 **Scope caveat, first.** A green result here means: on this machine, at platform HEAD
 `276a8b6`, the committed CLI reproduces the summary shape and the fixed counters implied by
 three specific 333/162/568-byte files. It does **not** mean the exporter is healthy, the

@@ -75,8 +75,18 @@ const CHILD_TIMEOUT_MS = 5000;
 const CHILD_MAX_BUFFER = 262144;
 const CHILD_HEAP_MB = 192;
 
-/** The one schema string this CLI emits. */
-const SUMMARY_SCHEMA = 'profile-dump-summary/0.1-draft.1';
+/**
+ * The one schema string this CLI emits.
+ *
+ * Pinned to `0.2-draft.1`, the shape that carries `rows`, `rowsTruncated`,
+ * `notDerived` and `limitations`. The 2026-11-08 runs recorded earlier in
+ * `docs/testing/2026-11-08-profile-dump-retained-export.md` used the `0.1-draft.1`
+ * bytes; those numbers stay as they were. This script follows the published
+ * shape it verifies, so a `0.1` document is now refused by the same check that
+ * refuses an unknown shape — the two are distinguishable by the version string
+ * alone, which is the reason the version was bumped.
+ */
+const SUMMARY_SCHEMA = 'profile-dump-summary/0.2-draft.1';
 
 /**
  * The three retained samples, each pinned by bytes and digest.
@@ -120,12 +130,59 @@ const SUMMARY_KEYS = Object.freeze([
   'inventory',
   'root',
   'counts',
+  'rows',
+  'rowsTruncated',
   'limits',
   'diagnostics',
   'diagnosticsTruncated',
   'completeness',
   'runtimeValidation',
   'certification',
+  'notDerived',
+  'limitations',
+]);
+
+/**
+ * The closed shape of one row. A row carries counts and closed words only; if a
+ * row ever grew a `id`, `name` or `config` key holding document text, this list
+ * refuses it — the vocabulary check is what keeps rows from becoming a carrier
+ * for operator content.
+ */
+const ROW_KEYS = Object.freeze([
+  'index',
+  'line',
+  'keyCount',
+  'idKind',
+  'nameKind',
+  'group',
+  'disabled',
+  'config',
+  'configKeyCount',
+  'unmodelledKeyCount',
+]);
+const ROW_TEXT_KINDS = Object.freeze(['absent', 'string', 'non-string']);
+const ROW_FLAG_KINDS = Object.freeze(['absent', 'true', 'false', 'null', 'other']);
+const ROW_CONFIG_KINDS = Object.freeze(['absent', 'mapping', 'not-mapping']);
+
+/** `NOT_DERIVED`, copied verbatim from the accepted observation record. */
+const NOT_DERIVED_EXPECTED = Object.freeze([
+  'declarations',
+  'availableCapabilities',
+  'resources',
+  'activation',
+  'loadability',
+]);
+
+/** `PROFILE_DUMP_LIMITATIONS`, pinned exactly: a new code is a shape change. */
+const LIMITATIONS_EXPECTED = Object.freeze([
+  'ROW_IS_NOT_A_DECLARATION',
+  'ROW_SET_COMPLETENESS_UNKNOWN',
+  'NO_DEPENDENCY_CLOSURE_ESTABLISHED',
+  'NO_LOADABILITY_OR_ACTIVATION_OBSERVED',
+  'ROW_SKIPS_UNMODELLED_KEYS',
+  'CONFIG_VALUES_NOT_INSPECTED',
+  'CERTIFICATION_NOT_CLAIMED',
+  'INPUT_IS_PARSED_TEXT_NOT_A_SANDBOX',
 ]);
 const INPUT_KEYS = Object.freeze(['bytes', 'lines']);
 const COUNTS_KEYS = Object.freeze([
@@ -148,6 +205,7 @@ const LIMITS_KEYS = Object.freeze([
   'maxNodes',
   'maxEntries',
   'maxDiagnostics',
+  'maxRows',
 ]);
 /**
  * The module's own limit constants, copied from `PROFILE_DUMP_LIMITS`
@@ -162,6 +220,7 @@ const LIMITS_EXPECTED = Object.freeze({
   maxNodes: 20000,
   maxEntries: 5000,
   maxDiagnostics: 64,
+  maxRows: 64,
 });
 const DIAGNOSTIC_KEYS = Object.freeze(['ordinal', 'code', 'line', 'detail']);
 
@@ -535,6 +594,67 @@ function judgeSummary(doc, expect) {
   }
   if (doc.certification !== false) return { ok: false, code: 65, reason: 'certification-value' };
 
+  // ---- rows: a capped display window over `counts.entries`, never an inventory
+  if (!Array.isArray(doc.rows) && doc.rows !== null) return { ok: false, code: 65, reason: 'rows-type' };
+  if (doc.rows === null) {
+    // Rows are null exactly where the counters are null: a refused document has no inventory
+    // to window over, and an empty array there would read as "there are no entries".
+    if (doc.counts !== null) return { ok: false, code: 65, reason: 'rows-null-with-counts' };
+    if (doc.rowsTruncated !== false) return { ok: false, code: 65, reason: 'rows-truncated-without-rows' };
+  } else {
+    if (doc.counts === null) return { ok: false, code: 65, reason: 'rows-without-counts' };
+    if (typeof doc.rowsTruncated !== 'boolean') return { ok: false, code: 65, reason: 'rows-truncated-type' };
+    // The window is truncated exactly when it is shorter than the count it windows over. Both
+    // directions matter: a short window without the flag would hide rows silently, and the flag
+    // without a short window would claim a loss that did not happen.
+    const short = doc.rows.length < doc.counts.entries;
+    if (doc.rowsTruncated !== short) return { ok: false, code: 65, reason: 'rows-truncated-mismatch' };
+    if (doc.rows.length > doc.limits.maxRows) return { ok: false, code: 65, reason: 'rows-over-limit' };
+    for (let position = 0; position < doc.rows.length; position += 1) {
+      const row = doc.rows[position];
+      if (keysViolate(row, ROW_KEYS)) return { ok: false, code: 65, reason: 'row-keys' };
+      // The window is the head of the sequence, in order: a row's index is its 1-based position.
+      if (row.index !== position + 1) return { ok: false, code: 65, reason: 'row-index' };
+      if (row.line !== null && !isPositiveInt(row.line)) return { ok: false, code: 65, reason: 'row-line' };
+      if (!isNonNegativeInt(row.keyCount)) return { ok: false, code: 65, reason: 'row-key-count' };
+      if (stringOutside(row.idKind, ROW_TEXT_KINDS)) return { ok: false, code: 65, reason: 'row-id-kind' };
+      if (stringOutside(row.nameKind, ROW_TEXT_KINDS)) return { ok: false, code: 65, reason: 'row-name-kind' };
+      if (stringOutside(row.group, ROW_FLAG_KINDS)) return { ok: false, code: 65, reason: 'row-group' };
+      if (stringOutside(row.disabled, ROW_FLAG_KINDS)) return { ok: false, code: 65, reason: 'row-disabled' };
+      if (stringOutside(row.config, ROW_CONFIG_KINDS)) return { ok: false, code: 65, reason: 'row-config' };
+      // A key count exists exactly when `config` is a mapping; null everywhere else.
+      if (row.config === 'mapping') {
+        if (!isNonNegativeInt(row.configKeyCount)) return { ok: false, code: 65, reason: 'row-config-key-count' };
+      } else if (row.configKeyCount !== null) {
+        return { ok: false, code: 65, reason: 'row-config-key-count-null' };
+      }
+      if (!isNonNegativeInt(row.unmodelledKeyCount)) {
+        return { ok: false, code: 65, reason: 'row-unmodelled-key-count' };
+      }
+      // A row's keys are counted against the row's size: modelled plus unmodelled cannot
+      // exceed it, and cannot be fewer than the five modelled names that are present.
+      if (row.unmodelledKeyCount > row.keyCount) return { ok: false, code: 65, reason: 'row-unmodelled-over-key-count' };
+    }
+  }
+
+  // ---- the two guard lists, compared exactly
+  if (!Array.isArray(doc.notDerived)) return { ok: false, code: 65, reason: 'not-derived-type' };
+  if (doc.notDerived.length !== NOT_DERIVED_EXPECTED.length) return { ok: false, code: 65, reason: 'not-derived-length' };
+  for (let position = 0; position < NOT_DERIVED_EXPECTED.length; position += 1) {
+    if (doc.notDerived[position] !== NOT_DERIVED_EXPECTED[position]) {
+      return { ok: false, code: 65, reason: 'not-derived-value' };
+    }
+  }
+  if (!Array.isArray(doc.limitations)) return { ok: false, code: 65, reason: 'limitations-type' };
+  if (doc.limitations.length !== LIMITATIONS_EXPECTED.length) {
+    return { ok: false, code: 65, reason: 'limitations-length' };
+  }
+  for (let position = 0; position < LIMITATIONS_EXPECTED.length; position += 1) {
+    if (doc.limitations[position] !== LIMITATIONS_EXPECTED[position]) {
+      return { ok: false, code: 65, reason: 'limitations-value' };
+    }
+  }
+
   for (const diagnostic of doc.diagnostics) {
     if (keysViolate(diagnostic, DIAGNOSTIC_KEYS)) return { ok: false, code: 65, reason: 'diagnostic-keys' };
     if (stringOutside(diagnostic.code, CODE_VALUES)) return { ok: false, code: 65, reason: 'diagnostic-code' };
@@ -558,6 +678,11 @@ function judgeSummary(doc, expect) {
   if (doc.input.lines !== expect.lines) return { ok: false, code: 66, reason: 'input-lines' };
   if (doc.counts.entries !== expect.entries) return { ok: false, code: 66, reason: 'entries' };
   if (doc.counts.jsScalars !== expect.jsScalars) return { ok: false, code: 66, reason: 'js-scalars' };
+  // These samples carry a handful of entries, so the window must be complete: if it were not,
+  // the cap would have changed and the expectation table's row counts would need revisiting.
+  if (!Array.isArray(doc.rows)) return { ok: false, code: 66, reason: 'rows-missing' };
+  if (doc.rows.length !== expect.entries) return { ok: false, code: 66, reason: 'rows-length' };
+  if (doc.rowsTruncated !== false) return { ok: false, code: 66, reason: 'rows-truncated' };
   // Each expression diagnostic must be exactly the shape the module builds for a
   // JS-tagged scalar: `pushDiagnostic(code, { line })` passes a line only, so
   // `ordinal` stays null and `detail` stays null

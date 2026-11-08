@@ -31,8 +31,16 @@
 
 import { isAlias, isMap, isScalar, isSeq, parseAllDocuments } from 'yaml';
 
-/** Format identifier of the summary document produced by this module. */
-export const PROFILE_DUMP_SCHEMA = 'profile-dump-summary/0.1-draft.1';
+/**
+ * Format identifier of the summary document produced by this module.
+ *
+ * Bumped from `0.1-draft.1` when `rows`, `rowsTruncated`, `notDerived` and `limitations` were
+ * added: four new top-level keys and one new limit are a shape change, and a consumer that
+ * verifies a closed key set must be able to tell the two shapes apart by the version string
+ * alone. The counters are unchanged; the version says "there are rows now", not "the numbers
+ * moved".
+ */
+export const PROFILE_DUMP_SCHEMA = 'profile-dump-summary/0.2-draft.1';
 
 /** Fixed, non-configurable limits. Deliberately not exposed as CLI options. */
 export const PROFILE_DUMP_LIMITS = Object.freeze({
@@ -42,7 +50,44 @@ export const PROFILE_DUMP_LIMITS = Object.freeze({
   maxNodes: 20000,
   maxEntries: 5000,
   maxDiagnostics: 64,
+  // Rows are a display window over the counters, not a second inventory: `counts.entries` stays
+  // authoritative and `rowsTruncated` says the window is short.
+  maxRows: 64,
 });
+
+/**
+ * Things this summary does not establish.
+ *
+ * Copied verbatim from the accepted profile-export observation record
+ * (`experiments/profile-export-fixture/observation.mjs`, `NOT_DERIVED`), because the reasons are
+ * the same and a second, differently-worded list would invite a reader to believe the two
+ * artifacts promise different things. In particular: a row is not a declaration, and an absent
+ * row is ambiguous between "not configured" and "bundle skipped".
+ *
+ * Frozen, and copied per summary, so one consumer cannot edit the list another consumer observes.
+ */
+export const PROFILE_DUMP_NOT_DERIVED = Object.freeze([
+  'declarations',
+  'availableCapabilities',
+  'resources',
+  'activation',
+  'loadability',
+]);
+
+/**
+ * Fixed limitation codes, in the style of `COMBINED_REPORT_LIMITATIONS`: statements about this
+ * artifact's envelope, not about any particular document.
+ */
+export const PROFILE_DUMP_LIMITATIONS = Object.freeze([
+  'ROW_IS_NOT_A_DECLARATION',
+  'ROW_SET_COMPLETENESS_UNKNOWN',
+  'NO_DEPENDENCY_CLOSURE_ESTABLISHED',
+  'NO_LOADABILITY_OR_ACTIVATION_OBSERVED',
+  'ROW_SKIPS_UNMODELLED_KEYS',
+  'CONFIG_VALUES_NOT_INSPECTED',
+  'CERTIFICATION_NOT_CLAIMED',
+  'INPUT_IS_PARSED_TEXT_NOT_A_SANDBOX',
+]);
 
 /** The one tag this command accepts without understanding: the DSH expression form. */
 const JS_TAG = 'tag:yaml.org,2002:js';
@@ -194,6 +239,40 @@ const KEY_NAME = 'name';
 const KEY_CONFIG = 'config';
 const KEY_GROUP = 'group';
 const KEY_DISABLED = 'disabled';
+
+/**
+ * The row fields this reader models. A key outside this set is counted, never copied, never
+ * interpreted: `plugin.id` nested inside `config` is arbitrary text, not a declaration pointer.
+ */
+const MODELLED_KEYS = Object.freeze(new Set([KEY_ID, KEY_NAME, KEY_CONFIG, KEY_GROUP, KEY_DISABLED]));
+
+/**
+ * Row vocabularies. Every field below is a count, a 1-based position, or one of these closed
+ * words — no user text ever enters a row.
+ *
+ * The distinctions are the whole point of having rows at all: `disabled: 'other'` is a different
+ * observation from `disabled: 'false'`, `config: 'not-mapping'` is a different one from
+ * `config: 'absent'`, and `disabled: 'null'` is different again because `EntryOptions` accepts
+ * null. Collapsing these pairs into booleans would make the summary unable to distinguish a typo
+ * from a deliberate setting.
+ */
+const ROW_TEXT_KIND = Object.freeze({
+  ABSENT: 'absent',
+  STRING: 'string',
+  NON_STRING: 'non-string',
+});
+const ROW_FLAG_KIND = Object.freeze({
+  ABSENT: 'absent',
+  TRUE: 'true',
+  FALSE: 'false',
+  NULL: 'null',
+  OTHER: 'other',
+});
+const ROW_CONFIG_KIND = Object.freeze({
+  ABSENT: 'absent',
+  MAPPING: 'mapping',
+  NOT_MAPPING: 'not-mapping',
+});
 
 /**
  * Collect diagnostics with a hard cap.
@@ -390,8 +469,96 @@ function walkTree(state, root, lineOf) {
 }
 
 /**
- * Check the top-level rows. Only the fields `EntryOptions` declares are looked at, and only
- * their presence and literal type — never their content.
+ * Classify a present/absent pair whose value should be a literal string.
+ * @param {object|undefined} pair Pair, or undefined when the key is absent.
+ * @returns {string} One of {@link ROW_TEXT_KIND}.
+ */
+function textKindOf(pair) {
+  if (pair === undefined) return ROW_TEXT_KIND.ABSENT;
+  return isLiteralString(pair.value) ? ROW_TEXT_KIND.STRING : ROW_TEXT_KIND.NON_STRING;
+}
+
+/**
+ * Classify a present/absent pair whose declared type is `boolean | null`.
+ *
+ * `null` gets its own word rather than being folded into `other`, because `EntryOptions` accepts
+ * it (`group?: boolean | null`, `disabled?: boolean | null`,
+ * `vendor/loader/src/config/entry.ts:8-24`) and the loader reads it as "not set". Reporting a
+ * legal form as a type error would send a reader looking for a bug that is not there.
+ *
+ * @param {object|undefined} pair Pair, or undefined when the key is absent.
+ * @returns {string} One of {@link ROW_FLAG_KIND}.
+ */
+function flagKindOf(pair) {
+  if (pair === undefined) return ROW_FLAG_KIND.ABSENT;
+  if (!isScalar(pair.value)) return ROW_FLAG_KIND.OTHER;
+  const value = pair.value.value;
+  if (value === true) return ROW_FLAG_KIND.TRUE;
+  if (value === false) return ROW_FLAG_KIND.FALSE;
+  if (value === null) return ROW_FLAG_KIND.NULL;
+  return ROW_FLAG_KIND.OTHER;
+}
+
+/**
+ * Count the row's keys this reader does not model.
+ *
+ * The keys themselves are not returned: a key name is operator text, and `config:` in particular
+ * can hold anything. A count with a line number is enough to send a reader to the right line.
+ *
+ * @param {import('yaml').YAMLMap} row Entry mapping.
+ * @returns {number} How many pairs carry an unmodelled key.
+ */
+function unmodelledKeyCount(row) {
+  let count = 0;
+  for (const pair of row.items) {
+    const key = pair?.key;
+    const name = isScalar(key) ? key.value : undefined;
+    if (typeof name !== 'string' || !MODELLED_KEYS.has(name)) count += 1;
+  }
+  return count;
+}
+
+/**
+ * Build one row: position, line, and closed-vocabulary shape facts only.
+ *
+ * This is deliberately *not* a structured declaration. It answers "what does this dump row look
+ * like" and can never answer "what will this profile load", which is why it carries no id, no
+ * name, no config value and no dependency statement.
+ *
+ * @param {import('yaml').YAMLMap} row Entry mapping that is already known to be a mapping.
+ * @param {number} index Zero-based position in the root sequence.
+ * @param {number|null} line 1-based line the row starts on.
+ * @returns {object} Row with a fixed key order.
+ */
+function buildRow(row, index, line) {
+  const idPair = findPair(row, KEY_ID);
+  const namePair = findPair(row, KEY_NAME);
+  const configPair = findPair(row, KEY_CONFIG);
+  const groupPair = findPair(row, KEY_GROUP);
+  const disabledPair = findPair(row, KEY_DISABLED);
+  const configIsMapping = configPair !== undefined && isMap(configPair.value);
+
+  return {
+    index: index + 1,
+    line,
+    keyCount: row.items.length,
+    idKind: textKindOf(idPair),
+    nameKind: textKindOf(namePair),
+    group: flagKindOf(groupPair),
+    disabled: flagKindOf(disabledPair),
+    config: configPair === undefined
+      ? ROW_CONFIG_KIND.ABSENT
+      : (configIsMapping ? ROW_CONFIG_KIND.MAPPING : ROW_CONFIG_KIND.NOT_MAPPING),
+    configKeyCount: configIsMapping ? configPair.value.items.length : null,
+    unmodelledKeyCount: unmodelledKeyCount(row),
+  };
+}
+
+/**
+ * Check the top-level rows, and collect the row window while doing it.
+ *
+ * Only the fields `EntryOptions` declares are looked at, and only their presence and literal
+ * type — never their content.
  *
  * @param {object} state Mutable walk state.
  * @param {import('yaml').YAMLSeq} root Root sequence.
@@ -467,6 +634,14 @@ function checkEntries(state, root, lineOf) {
     ) {
       state.counts.entriesDisabled += 1;
     }
+
+    // A row is a display window over the counters, so the cap truncates the window and says so;
+    // `counts.entries` remains authoritative and is never truncated.
+    if (state.rows.length >= PROFILE_DUMP_LIMITS.maxRows) {
+      state.rowsTruncated = true;
+    } else {
+      state.rows.push(buildRow(row, index, lineOf(row.range?.[0])));
+    }
   }
 }
 
@@ -504,12 +679,19 @@ function buildSummary(state, inventory, root, input) {
     inventory,
     root,
     counts: inventory === 'none' ? null : state.counts,
+    // Rows follow `counts` and are null wherever the counters are null: a refused document has no
+    // inventory to window over, and an empty array would read as "there are no entries".
+    rows: inventory === 'none' ? null : state.rows,
+    rowsTruncated: inventory === 'none' ? false : state.rowsTruncated,
     limits: { ...PROFILE_DUMP_LIMITS },
     diagnostics: state.diagnostics,
     diagnosticsTruncated: state.diagnosticsTruncated,
     completeness: 'unknown',
     runtimeValidation: 'not-performed',
     certification: false,
+    // Copied per summary, so a caller may adapt its own copy without touching the shared list.
+    notDerived: [...PROFILE_DUMP_NOT_DERIVED],
+    limitations: [...PROFILE_DUMP_LIMITATIONS],
   };
 }
 
@@ -533,6 +715,8 @@ export function summarizeProfileDumpText(text) {
   const bytes = Buffer.byteLength(text, 'utf8');
   const state = {
     counts: emptyCounts(),
+    rows: [],
+    rowsTruncated: false,
     diagnostics: [],
     diagnosticsTruncated: false,
     entryDiagnostics: 0,

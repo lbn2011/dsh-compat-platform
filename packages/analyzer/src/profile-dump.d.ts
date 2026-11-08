@@ -1,5 +1,5 @@
 /** Format identifier of the profile-dump summary document. */
-export const PROFILE_DUMP_SCHEMA: 'profile-dump-summary/0.1-draft.1';
+export const PROFILE_DUMP_SCHEMA: 'profile-dump-summary/0.2-draft.1';
 
 /**
  * Fixed limits. These are policy limits on the **input** and on the walk this command performs;
@@ -15,7 +15,27 @@ export const PROFILE_DUMP_LIMITS: {
   readonly maxNodes: 20000;
   readonly maxEntries: 5000;
   readonly maxDiagnostics: 64;
+  readonly maxRows: 64;
 };
+
+/**
+ * Things this summary does not establish. Copied verbatim from the profile-export observation
+ * record (`NOT_DERIVED`), because the reasons are identical: a row is not a declaration, and an
+ * absent row is ambiguous between "not configured" and "bundle skipped".
+ */
+export const PROFILE_DUMP_NOT_DERIVED: readonly [
+  'declarations',
+  'availableCapabilities',
+  'resources',
+  'activation',
+  'loadability',
+];
+
+/**
+ * Fixed limitation codes, shaped like `COMBINED_REPORT_LIMITATIONS`: statements about this
+ * artifact's envelope rather than about any particular document.
+ */
+export const PROFILE_DUMP_LIMITATIONS: readonly string[];
 
 /** Every diagnostic code this module can emit. Closed set. */
 export const PROFILE_DUMP_CODES: {
@@ -92,6 +112,36 @@ export interface ProfileDumpDiagnostic {
   readonly detail: ProfileDumpDetail | null;
 }
 
+/**
+ * One row: position, line and closed-vocabulary shape facts only.
+ *
+ * A row is **not** a declaration. It carries no id, name, config key or config value — the key
+ * names in the source are compared against the five modelled names and never copied — so it can
+ * answer "what does this row look like" and never "what will this profile load".
+ *
+ * The `group`/`disabled` distinction between `'false'`, `'null'` and `'other'`, and the `config`
+ * distinction between `'absent'` and `'not-mapping'`, are deliberate: collapsing them would make a
+ * legal form, a setting and a typo indistinguishable. `null` is its own word because
+ * `EntryOptions` declares both fields as `boolean | null` (`vendor/loader/src/config/entry.ts`).
+ */
+export interface ProfileDumpRow {
+  /** 1-based position in the root sequence. */
+  index: number;
+  /** 1-based line the row starts on, or `null` when the node carries no position. */
+  line: number | null;
+  /** Number of keys in the row mapping, modelled or not. */
+  keyCount: number;
+  idKind: 'absent' | 'string' | 'non-string';
+  nameKind: 'absent' | 'string' | 'non-string';
+  group: 'absent' | 'true' | 'false' | 'null' | 'other';
+  disabled: 'absent' | 'true' | 'false' | 'null' | 'other';
+  config: 'absent' | 'mapping' | 'not-mapping';
+  /** Keys inside `config` when it is a mapping; `null` otherwise. Names are never emitted. */
+  configKeyCount: number | null;
+  /** Keys outside the modelled set. Counted only; `plugin.id` inside `config` is not a pointer. */
+  unmodelledKeyCount: number;
+}
+
 /** Counts only. No identifier, name, key or value is ever included. */
 export interface ProfileDumpCounts {
   entries: number;
@@ -119,6 +169,13 @@ export interface ProfileDumpSummary {
   inventory: 'present' | 'empty' | 'none';
   root: string;
   counts: ProfileDumpCounts | null;
+  /**
+   * A capped display window over `counts.entries`, `null` wherever `counts` is `null` (a refused
+   * document has no inventory to window over). Never an inventory: `rowsTruncated` says the
+   * window is short, and `counts.entries` stays authoritative.
+   */
+  rows: ProfileDumpRow[] | null;
+  rowsTruncated: boolean;
   limits: {
     maxBytes: number;
     maxLines: number;
@@ -126,12 +183,17 @@ export interface ProfileDumpSummary {
     maxNodes: number;
     maxEntries: number;
     maxDiagnostics: number;
+    maxRows: number;
   };
   diagnostics: ProfileDumpDiagnostic[];
   diagnosticsTruncated: boolean;
   completeness: 'unknown';
   runtimeValidation: 'not-performed';
   certification: false;
+  /** The five names from `NOT_DERIVED`, verbatim. A per-summary copy, safe to adapt. */
+  notDerived: string[];
+  /** Fixed limitation codes, copied per summary. */
+  limitations: string[];
 }
 
 /**

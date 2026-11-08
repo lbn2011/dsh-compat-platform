@@ -37,6 +37,7 @@ import {
 } from '../src/diagnose.js';
 import * as diagnoseModule from '../src/diagnose.js';
 import { buildCombinedReport } from '../src/combined-report.js';
+import { PROFILE_DUMP_SCHEMA } from '../src/profile-dump.js';
 import { main } from '../src/diagnose-cli.js';
 // The runtime lane's case catalog is the contract, not a test-local literal: a
 // fixture is complete only when it carries exactly these three ids.
@@ -963,7 +964,9 @@ test('a real-envelope profile-only run of a valid export is clear and exits 0', 
   assert.equal(report.combinedReport, null, 'no lane was named');
 
   const summary = report.profile.summary;
-  assert.equal(summary.profileDumpSummary, 'profile-dump-summary/0.1-draft.1');
+  // The version string is the summary module's own; importing it keeps this pass-through test
+  // from silently pinning a shape the module no longer emits.
+  assert.equal(summary.profileDumpSummary, PROFILE_DUMP_SCHEMA);
   assert.equal(summary.documents, 1);
   assert.equal(summary.root, 'sequence');
   assert.equal(summary.inventory, 'present');

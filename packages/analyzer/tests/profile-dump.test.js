@@ -24,7 +24,9 @@ import { fileURLToPath } from 'node:url';
 import {
   PROFILE_DUMP_CODES,
   PROFILE_DUMP_EXIT,
+  PROFILE_DUMP_LIMITATIONS,
   PROFILE_DUMP_LIMITS,
+  PROFILE_DUMP_NOT_DERIVED,
   PROFILE_DUMP_SCHEMA,
   profileDumpExitCode,
   summarizeProfileDumpText,
@@ -796,3 +798,161 @@ describe('profile-dump CLI — real files and injected streams', () => {
   });
 });
 
+
+describe('profile-dump — rows are a closed window, not an inventory', () => {
+  const dump = [
+    '# == @fixture/dsh-bundle-probe',
+    '- id: alpha',
+    '  name: ./plugins/alpha.js',
+    '  config:',
+    '    marker: sentinel-value-alpha',
+    '- id: beta',
+    '  name: ./plugins/beta.js',
+    '  disabled: true',
+    '',
+  ].join('\n');
+
+  test('one row per entry, in order, with position and line', () => {
+    const { summary } = summarize(dump);
+    assert.equal(summary.rows.length, 2);
+    assert.deepEqual(
+      summary.rows.map((row) => [row.index, row.line]),
+      [
+        [1, 2],
+        [2, 6],
+      ],
+    );
+  });
+
+  test('a row states shape in closed words and never the values', () => {
+    const { summary, json } = summarize(dump);
+    assert.deepEqual(summary.rows[0], {
+      index: 1,
+      line: 2,
+      keyCount: 3,
+      idKind: 'string',
+      nameKind: 'string',
+      group: 'absent',
+      disabled: 'absent',
+      config: 'mapping',
+      configKeyCount: 1,
+      unmodelledKeyCount: 0,
+    });
+    assert.equal(summary.rows[1].disabled, 'true');
+    assert.equal(summary.rows[1].config, 'absent');
+    assert.equal(summary.rows[1].configKeyCount, null);
+    assertSilent(json, ['alpha', 'beta', 'plugins/', 'sentinel-value-alpha', 'marker', '@fixture']);
+  });
+
+  test('a setting, a null and an unmodelled value are three different observations', () => {
+    const { summary, exit } = summarize(
+      ['- id: a', '  disabled: false', '- id: b', '  disabled: null', '- id: c', '  disabled: "yes"', '']
+        .join('\n'),
+    );
+    // `false` is a deliberate setting, `null` is the legal "not set" form `EntryOptions` declares
+    // (`boolean | null`), and `"yes"` is a value this reader did not model. Reporting `null` as a
+    // type error would send a reader hunting a bug that is not there.
+    assert.equal(summary.rows[0].disabled, 'false');
+    assert.equal(summary.rows[1].disabled, 'null');
+    assert.equal(summary.rows[2].disabled, 'other');
+    // None of the three is an entry-level diagnostic, so all three stay on an exit-0 summary.
+    assert.equal(exit, PROFILE_DUMP_EXIT.OK);
+  });
+
+  test('a group marker is read with the same vocabulary as a flag', () => {
+    const { summary } = summarize('- id: a\n  group: true\n- id: b\n  group: demo\n');
+    assert.equal(summary.rows[0].group, 'true');
+    // `group` is declared `boolean | null`, so a string label is `other` — the row is still
+    // reported, with the shape it actually has.
+    assert.equal(summary.rows[1].group, 'other');
+  });
+
+  test('an absent config and a non-mapping config are different observations', () => {
+    const { summary } = summarize('- id: a\n- id: b\n  config: not-a-mapping\n');
+    assert.equal(summary.rows[0].config, 'absent');
+    assert.equal(summary.rows[1].config, 'not-mapping');
+    assert.equal(summary.rows[1].configKeyCount, null);
+  });
+
+  test('keys this reader does not model are counted, never copied', () => {
+    const { summary, json } = summarize(
+      '- id: a\n  inject: ["sentinel-service"]\n  disabeld: true\n',
+    );
+    assert.equal(summary.rows[0].keyCount, 3);
+    assert.equal(summary.rows[0].unmodelledKeyCount, 2);
+    assertSilent(json, ['inject', 'disabeld', 'sentinel-service']);
+  });
+
+  test('a refused document has no rows, and does not pretend to have none', () => {
+    // A root mapping is a refusal, not an empty inventory: `rows: []` would read as "no entries".
+    const { ok, summary } = summarize('id: not-a-sequence\n');
+    assert.equal(ok, false);
+    assert.equal(summary.inventory, 'none');
+    assert.equal(summary.rows, null);
+    assert.equal(summary.rowsTruncated, false);
+    assert.equal(summary.counts, null);
+  });
+
+  test('an empty inventory windows to an empty row list', () => {
+    const { summary } = summarize('[]\n');
+    assert.deepEqual(summary.rows, []);
+    assert.equal(summary.rowsTruncated, false);
+  });
+
+  test('the window is capped and says so, while the counter stays whole', () => {
+    const rows = [];
+    for (let index = 0; index < PROFILE_DUMP_LIMITS.maxRows + 1; index += 1) {
+      rows.push(`- id: row-${index}`);
+    }
+    const { summary } = summarize(`${rows.join('\n')}\n`);
+    assert.equal(summary.counts.entries, PROFILE_DUMP_LIMITS.maxRows + 1);
+    assert.equal(summary.rows.length, PROFILE_DUMP_LIMITS.maxRows);
+    assert.equal(summary.rowsTruncated, true);
+    assert.equal(summary.rows.at(-1).index, PROFILE_DUMP_LIMITS.maxRows);
+  });
+});
+
+describe('profile-dump — the two guard lists', () => {
+  test('notDerived keeps the five names from the observation record, verbatim', () => {
+    const { summary } = summarize('- id: a\n');
+    assert.deepEqual(summary.notDerived, [
+      'declarations',
+      'availableCapabilities',
+      'resources',
+      'activation',
+      'loadability',
+    ]);
+  });
+
+  test('limitations is the fixed list, not a summary of what was seen', () => {
+    const { summary } = summarize('- id: a\n');
+    assert.deepEqual(summary.limitations, [
+      'ROW_IS_NOT_A_DECLARATION',
+      'ROW_SET_COMPLETENESS_UNKNOWN',
+      'NO_DEPENDENCY_CLOSURE_ESTABLISHED',
+      'NO_LOADABILITY_OR_ACTIVATION_OBSERVED',
+      'ROW_SKIPS_UNMODELLED_KEYS',
+      'CONFIG_VALUES_NOT_INSPECTED',
+      'CERTIFICATION_NOT_CLAIMED',
+      'INPUT_IS_PARSED_TEXT_NOT_A_SANDBOX',
+    ]);
+  });
+
+  test('each summary gets its own copy, so adapting it cannot edit the constant', () => {
+    const { summary } = summarize('- id: a\n');
+    summary.notDerived.push('something-else');
+    summary.limitations.length = 0;
+    const second = summarize('- id: a\n').summary;
+    assert.equal(second.notDerived.length, 5);
+    assert.equal(second.limitations.length, 8);
+    assert.equal(PROFILE_DUMP_NOT_DERIVED.length, 5);
+    assert.equal(PROFILE_DUMP_LIMITATIONS.length, 8);
+  });
+
+  test('a refused document still states both lists', () => {
+    const { summary } = summarize('id: not-a-sequence\n');
+    assert.equal(summary.rows, null);
+    assert.equal(summary.notDerived.length, 5);
+    assert.equal(summary.limitations.length, 8);
+  });
+});

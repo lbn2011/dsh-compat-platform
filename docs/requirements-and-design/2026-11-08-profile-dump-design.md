@@ -233,10 +233,11 @@ Two different kinds, deliberately not conflated in either the output or the docu
 | `maxLines` 20000 | **before** parsing (counted on the decoded text) | pathological line counts, cheaply |
 | `maxDepth` 32 | **after** parsing, during the walk | how deep a structure this command will describe |
 | `maxNodes` 20000 | after parsing | total node budget for the walk |
-| `maxEntries` 5000 | after parsing | top-level row budget |
+| `maxEntries` 5000 | after parsing | top-level entry budget |
 | `maxDiagnostics` 64 | while collecting | output size; sets `diagnosticsTruncated` |
+| `maxRows` 64 | while collecting | size of the row **window**; sets `rowsTruncated`, never `counts.entries` |
 
-The last four are **policy limits on what this command will report**. They do **not** bound the
+The last five are **policy limits on what this command will report**. They do **not** bound the
 parser's own resource use, and this document does not claim they do. Parsing cost is bounded only by
 `maxBytes` and by the process envelope the command is run inside.
 
@@ -253,7 +254,7 @@ Exactly these keys, no others:
 
 ```json
 {
-  "profileDumpSummary": "profile-dump-summary/0.1-draft.1",
+  "profileDumpSummary": "profile-dump-summary/0.2-draft.1",
   "input": { "bytes": 812, "lines": 23 },
   "documents": 1,
   "inventory": "present",
@@ -261,17 +262,56 @@ Exactly these keys, no others:
   "counts": {
     "entries": 2, "entryGroups": 0,
     "entriesWithId": 2, "entriesWithName": 2, "entriesWithConfig": 2, "entriesDisabled": 0,
-    "jsScalars": 2, "distinctTags": 2, "nodes": 14, "scalars": 9, "maxDepth": 4
+    "jsScalars": 2, "distinctTags": 2, "nodes": 14, "scalars": 11, "maxDepth": 4
   },
+  "rows": [
+    { "index": 1, "line": 2, "keyCount": 3, "idKind": "string", "nameKind": "string",
+      "group": "absent", "disabled": "absent", "config": "mapping",
+      "configKeyCount": 2, "unmodelledKeyCount": 0 },
+    { "index": 2, "line": 9, "keyCount": 4, "idKind": "string", "nameKind": "string",
+      "group": "false", "disabled": "true", "config": "mapping",
+      "configKeyCount": 1, "unmodelledKeyCount": 1 }
+  ],
+  "rowsTruncated": false,
   "limits": { "maxBytes": 1048576, "maxLines": 20000, "maxDepth": 32,
-              "maxNodes": 20000, "maxEntries": 5000, "maxDiagnostics": 64 },
-  "diagnostics": [ { "ordinal": 2, "code": "JS_EXPRESSION_NOT_EVALUATED", "line": 9 } ],
+              "maxNodes": 20000, "maxEntries": 5000, "maxDiagnostics": 64, "maxRows": 64 },
+  "diagnostics": [ { "ordinal": 2, "code": "JS_EXPRESSION_NOT_EVALUATED", "line": 9, "detail": null } ],
   "diagnosticsTruncated": false,
   "completeness": "unknown",
   "runtimeValidation": "not-performed",
-  "certification": false
+  "certification": false,
+  "notDerived": ["declarations", "availableCapabilities", "resources", "activation", "loadability"],
+  "limitations": [
+    "ROW_IS_NOT_A_DECLARATION", "ROW_SET_COMPLETENESS_UNKNOWN",
+    "NO_DEPENDENCY_CLOSURE_ESTABLISHED", "NO_LOADABILITY_OR_ACTIVATION_OBSERVED",
+    "ROW_SKIPS_UNMODELLED_KEYS", "CONFIG_VALUES_NOT_INSPECTED",
+    "CERTIFICATION_NOT_CLAIMED", "INPUT_IS_PARSED_TEXT_NOT_A_SANDBOX"
+  ]
 }
 ```
+
+The version string is `0.2-draft.1` because `rows`, `rowsTruncated`, `notDerived` and `limitations`
+were added, and a closed-key-set consumer must be able to tell the two shapes apart from the
+version alone. The counters are unchanged by that addition.
+
+`rows` is a **capped display window** over `counts.entries`, never a second inventory:
+`counts.entries` stays authoritative, the window holds at most `maxRows` entries, `rowsTruncated`
+says when it is short, and `rows` is `null` exactly where `counts` is `null` — a refused document
+must not look like a document with no entries. Each row is `{index, line, keyCount, idKind,
+nameKind, group, disabled, config, configKeyCount, unmodelledKeyCount}` in that fixed order, where
+`index` is 1-based, `idKind`/`nameKind` ∈ `absent|string|non-string`, `group`/`disabled` ∈
+`absent|true|false|null|other`, `config` ∈ `absent|mapping|not-mapping`, and `configKeyCount` is a
+number only when `config` is a mapping. The flag words are kept apart deliberately:
+`disabled: "false"` is a setting, `disabled: "null"` is the legal "not set" form `EntryOptions`
+declares (`boolean | null`), and `disabled: "other"` is a value this reader did not model — one
+boolean would make a legal form, a setting and a typo indistinguishable.
+
+`notDerived` (the five names from `NOT_DERIVED`,
+`experiments/profile-export-fixture/observation.mjs`) and `limitations` (shaped like
+`COMBINED_REPORT_LIMITATIONS`) are the guards on that window; both are per-summary copies so a
+consumer may adapt its own copy without affecting the next. This is the landing point the
+structured-profile-input boundary design asks for: process facts unchanged, rows opaque, row text
+absent, `completeness` still `unknown`, `certification` still `false`.
 
 Rules:
 
@@ -340,6 +380,11 @@ Explicit **non**-checks, stated because silence otherwise reads as approval:
 | `counts.entriesDisabled` | rows whose `disabled` is `true` |
 | `counts.jsScalars` / `distinctTags` | walk over scalar nodes' `tag` |
 | `counts.nodes` / `maxDepth` | iterative walk |
+| `rows[]` | first `maxRows` members of the root sequence, in file order; each is `buildRow(row, index, line)` over the same pairs `checkEntries` already visits, so a row can never describe a node the checks did not see |
+| `rows[].line` | node `range[0]` of the row mapping, mapped through the same newline offsets as diagnostics |
+| `rows[].unmodelledKeyCount` | keys outside `MODELLED_KEYS` (`id`, `name`, `config`, `group`, `disabled`) — counted, never named |
+| `rowsTruncated` | true when the root sequence holds more members than `maxRows`; false when `rows` is `null` |
+| `notDerived` / `limitations` | fixed lists copied per summary from `PROFILE_DUMP_NOT_DERIVED` / `PROFILE_DUMP_LIMITATIONS` |
 | `diagnostics[].line` | node `range[0]` mapped to a line via newline offsets of the input text |
 
 ## 6. Risks and mitigations
