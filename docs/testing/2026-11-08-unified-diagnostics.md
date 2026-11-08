@@ -331,3 +331,17 @@ identical. Equality means those regular files were the same at those two instant
 prove the package was installed intact, does not vouch for its provenance, and cannot rule out a
 change that happened and was reverted between the snapshots. The installed version reads
 `2.9.1`, matching the pin, and the snapshot refuses if the directory or any entry is a symlink.
+
+## Later re-run against `profile-dump-summary/0.2-draft.1` (2026-11-09)
+
+The profile summariser this entry carries gained a capped row window and bumped its own schema
+string (see [`2026-11-08-profile-dump-rows.md`](./2026-11-08-profile-dump-rows.md)). Because the
+envelope passes that summary through untouched, this file's suite was re-run once under the same
+envelope: `acceptance_exit=0`, `49/49`, `0` fail, `selected_inputs=12`, `hashes=identical`,
+`envelope_mismatch=none`, yaml `233` files `identical`, `memory_peak=40181760` B, `pids_peak=16`,
+terminal settled with `main_pid=0`
+(`/data/dsh-ecosystem-test-artifacts/runs/20261108T164303Z-diagnose-batch-844613-9187`).
+
+This confirms the envelope shape and exit mapping are unchanged by the summary's shape bump. It does
+not re-certify anything the earlier rounds did not, and the earlier `48/40` and `49/49` rounds above
+remain the record for the bytes they ran on.

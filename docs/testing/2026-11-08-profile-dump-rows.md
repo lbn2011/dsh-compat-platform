@@ -112,6 +112,23 @@ And on the two failure paths, as processes: the partial case exits `1` with
 `counts: null`, `rows: null` and `rowsTruncated: false` — the null-not-empty rule visible at the
 process boundary, with both guard lists still present.
 
+## 2c. Round 5 — the envelope carrier, re-run once against the new summary
+
+The unified diagnostics entry (`packages/analyzer/src/diagnose.js`) carries a profile summary
+through untouched, so a shape change there is only safe if that carrier still passes. One bounded
+run of `scripts/diagnose-batch/run.sh` — `/data/dsh-ecosystem-test-artifacts/runs/20261108T164303Z-diagnose-batch-844613-9187` —
+returned `acceptance_exit=0`, `tap_tests=49`, `tap_pass=49`, `tap_fail=0`, `selected_inputs=12`,
+`hashes=identical`, `envelope_mismatch=none`, yaml `233` files `identical`,
+`mem_available_kib=1234684` ≥ `819200`, `memory_peak=40181760` B, `pids_peak=16`, terminal settled
+with `main_pid=0`.
+
+What this shows: the envelope's own keys (`diagnoseVersion`, `certification`, `correlation`,
+`profile`, `combinedReport`, `nextSteps`, `limitations`) and the exit mapping are unchanged, and the
+profile lane accepts a `0.2-draft.1` summary. It does **not** show that a consumer reads `rows` —
+nothing in the envelope does; the rows are extra payload inside `profile.summary`, and the one test
+that pins the summary's version string now imports `PROFILE_DUMP_SCHEMA` instead of a literal, so it
+tracks the module rather than freezing a shape.
+
 ## 3. Round 2 — the three retained real captures, 0.2 shape
 
 Launcher `scripts/profile-dump-retained-export/run.sh`; raw artefacts
