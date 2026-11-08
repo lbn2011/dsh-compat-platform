@@ -21,6 +21,8 @@ State as of this date, based on files present in this checkout. "Available" mean
 | Admission diagnostics | available | `dsh-compat-admission` |
 | Combined report | available | `dsh-compat-report` |
 | Snapshot comparison | available | `dsh-compat-compare` |
+| Profile dump summary | available — bounded replay passed (2026-11-08) | `dsh-compat-profile-dump`; [`docs/testing/2026-11-08-profile-dump-retained-export.md`](docs/testing/2026-11-08-profile-dump-retained-export.md) |
+| Unified read-only diagnostics | available — one file executed, 49/49 after test-side fixes (round 1: 40/48); not full-suite | `dsh-compat-diagnose`; `dsh-compat-platform/diagnose`; [`packages/analyzer/README.md` §13](packages/analyzer/README.md); [`docs/testing/2026-11-08-unified-diagnostics.md`](docs/testing/2026-11-08-unified-diagnostics.md) |
 | `packages/host/`, `packages/client/`, `packages/runtime/` | not implemented (empty package directories) | — |
 | Real profile-export acceptance | experimental, **not** a package capability: one authorised batch (`20261107T062654Z-profile-export-real-512194-18141`) ran green on 2026-11-07 | [measured record](docs/testing/2026-11-07-profile-export-real.md); [batch summary](../../experiments/acceptance/runs/20261107T062654Z-profile-export-real-512194-18141/summary.txt) |
 

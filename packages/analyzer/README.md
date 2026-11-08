@@ -822,3 +822,173 @@ returns a partial walk as if it were complete (`counts` is `null`, `inventory` i
   for an unbounded rerun.
 
 
+## 13. Unified diagnostics — `dsh-compat-diagnose` (one file executed: 49/49)
+
+One read-only envelope over **one exported profile dump** and **up to three explicitly
+named lane documents**. It is an orchestration surface, not a fourth analysis lane: every
+judgement it prints comes from the modules and validators named below.
+
+```bash
+# after install
+dsh-compat-diagnose --profile dump.yml \
+  --static decls.json --declaration-validator ./validator.js \
+  --runtime runtime.json \
+  --admission admission.json --admission-validator ./admission-validator.js
+
+# in this checkout, without installing
+node src/diagnose-cli.js --profile dump.yml
+```
+
+### 13.1 What it reads
+
+| flag | input | who decides |
+| --- | --- | --- |
+| `--profile` | one exported profile dump (YAML text) | `summarizeProfileDumpText` (§12) |
+| `--static` + `--declaration-validator` | one parsed JSON document | `buildCombinedReport` + the named validator |
+| `--runtime` | one parsed JSON document | `summarizeRuntimeEvidence` |
+| `--admission` + `--admission-validator` | one parsed JSON document | `buildCombinedReport` + the named validator |
+
+At least one flag is required; each may be given at most once; `--profile` is optional and a
+lane's validator flag is required exactly when its lane is named. No positional argument, no `-`
+(stdin), no directory scan, no environment lookup and no output path exist on this surface.
+Every file goes through the shared bounded reader: a regular file of at most `1048576` bytes,
+decoded as strict UTF-8. Read failures, non-JSON documents and unloadable validators each become
+a **`provided`** block with a fixed issue code — one source's failure never discards another's
+result, and when every named lane fails the embedded combined report still carries them.
+
+### 13.2 Output
+
+```json
+{
+  "diagnoseVersion": "dsh-compat-diagnose/0.1-draft.1",
+  "certification": false,
+  "correlation": "not-established",
+  "profile": { "state": "provided", "source": "profile-input", "outcome": "clear",
+               "issues": [], "summary": { "documents": 1, "...": "..." }, "entryDiagnostics": 0 },
+  "combinedReport": { "reportVersion": "combined-report/0.1-draft.1", "channels": { "...": "..." } },
+  "nextSteps": [ { "code": "RUNTIME_ATTENTION", "source": "runtime", "message": "..." } ],
+  "limitations": ["...", "PROFILE_BLOCK_IS_A_SUMMARY_NOT_A_DUMP", "NO_CROSS_SOURCE_IDENTITY"]
+}
+```
+
+- `source` is a **fixed slot label** (`profile-input`, `static-input`, …), never a file path and
+  never provenance evidence. Naming sources together establishes no identity between them.
+- Successful lanes retain the library's `result` verbatim. The wrapper may add failed-source
+  channels or construct the all-failed skeleton while retaining the existing combined-report
+  schema. The envelope as a whole **may contain plugin ids, capability names,
+  resource tuples and paths taken from the input documents** — it is not a redacted document.
+  The profile block is the exception: counts, limits, fixed diagnostics, fixed codes, no dump
+  text and no plugin ids. A refused dump still keeps that summary rather than a bare code.
+- `combinedReport` is `null` **only** when no lane was named. If lanes were named and all of them
+  failed before the builder, this module assembles the same schema itself: fixed version and
+  flags, the library's own fixed `limitations` list, each named lane `provided` with a degraded
+  outcome. That is stated here because a reader cannot tell the two apart by shape alone.
+- `nextSteps` carries at most one fixed-code, fixed-text step per source — read-only advice that
+  names the recorded cause. A source nobody named gets `SOURCE_NOT_PROVIDED`, which never moves
+  the exit code.
+
+### 13.3 Exit codes (closed table)
+
+| code | meaning |
+| --- | --- |
+| `0` | every **requested** source is clear |
+| `1` | at least one requested source needs attention |
+| `2` | at least one requested source is invalid or unusable |
+| `3` | usage problem, or a validator that could not be loaded or used |
+| `4` | a requested source produced no verdict after a usable document was accepted |
+| `5` | internal, serialization or output failure |
+
+Precedence `5 > 3 > 4 > 2 > 1 > 0`. A usage problem still emits one `{"error":{"code":"USAGE"}}`
+line on stdout before the help text on stderr, so a consumer never parses help as a report.
+`--help` is the one path that exits `0` without a report and writes nothing to stdout.
+
+**Absence is not a finding.** Unlike `combinedReportExitCode` (which counts an absent lane as
+attention), a source nobody named produces an `absent` block with outcome `unknown` and does not
+move the code. Presence is decided by the input's own keys — there is no separate `requested`
+list that could disagree with the data. An own key holding `null`/`undefined` is refused as
+malformed rather than read as absence.
+
+### 13.4 Trust boundary
+
+- The profile text is summarized as inert text; no plugin, host, driver root or profile is
+  imported, evaluated or executed, and no `!!js` value is ever evaluated.
+- The two validator flags import a module **into the CLI process** with the caller's privileges.
+  That is an explicit selection, not a sandbox — only point them at trusted code. The fixed
+  export name is `validateDeclaration` / `validateAdmissionEvidence`; there is no `--export` flag.
+- A lane's validator is imported only **after** that lane's JSON parsed. A read failure or
+  invalid JSON syntax therefore does not trigger that lane's module import. Parsed JSON that
+  violates the document schema still requires the validator and does not have this guarantee.
+
+### 13.5 What this command does **not** establish
+
+- that the sources describe the same host, build, commit or session — `correlation` is
+  `not-established` and nothing is merged across lanes;
+- that any plugin would load, activate or interoperate, that its `config` conforms to a schema,
+  or what any `!!js` expression evaluates to (§12.6 applies unchanged to the profile block);
+- that a dump is complete or authoritative, or that a clean envelope means a healthy profile;
+- anything certified: `certification` is always `false`.
+
+### 13.6 Library surface
+
+```js
+import { buildDiagnoseReport, diagnoseExitCode } from 'dsh-compat-platform/diagnose';
+
+const report = buildDiagnoseReport(
+  { profile: { text }, static: { document } },     // real payloads only
+  { validateDeclaration },                          // passed through unchanged
+);
+diagnoseExitCode(report); // 0 | 1 | 2 | 3 | 4
+```
+
+The public builder accepts **payloads only** — `{ text }` for the profile, `{ document }` for a
+lane. It has no failure input: the failure vocabulary (`INPUT_READ_FAILED`, `INPUT_JSON_INVALID`,
+`VALIDATOR_LOAD_FAILED`) is an *output* type, and only the CLI can record one, through the
+package-internal assembler that `package.json` `exports` does not expose. Options are validated
+up front whatever sources were named, so the same arguments never mean different things across
+invocations. Note the two vocabularies on the CLI path: lane names (`static`, `admission`) are
+mapped to the assembler's option names (`validateDeclaration`, `validateAdmissionEvidence`) in
+one place, because the assembler accepts only its own option keys.
+
+`diagnoseExitCode` re-checks the envelope rather than trusting it: the documented
+`diagnoseVersion`, `certification` and `correlation`, an array `nextSteps`, the presence of
+`profile`, and — when `combinedReport` is not `null` — a plain `channels` object carrying all
+three lanes as **own** properties. A missing or `null` channel throws; it is never filled in as
+`absent`, because a truncated report must not read as "nobody asked". Only
+`combinedReport === null` makes the three lanes absent, and an `absent` block must carry exactly
+`outcome: 'unknown'`. A shape violation is a fixed `TypeError` surfaced by the CLI as `5`; there
+is no separate "bad report" exit code. It is a shape check, not a provenance or brand check.
+
+### 13.7 Verification status
+
+- **Executed in two separately authorized bounded rounds.** Each run of `tests/diagnose.test.js`
+  used its own transient `systemd-run` unit (384 MiB, swap 0, 32 tasks, 50% CPU, 120 s ceiling),
+  with effective limits checked through cgroup and systemd readbacks before the workload:
+  - **round 1:** 48 cases, **40 pass / 8 fail**, exit `72`. The eight failures were fixtures and
+    expectations that disagreed with the documented contract — a YAML mapping root where the
+    summarizer accepts only a sequence root (`ROOT_NOT_SEQUENCE`), a runtime-evidence document
+    missing the three fixed `CASE_IDS` or carrying `message` in a closed `assertions` shape, a
+    rejected lane asserted as `attention` instead of `invalid`, and a validator read under the
+    lane name instead of the assembler's option key.
+  - **round 2 (after test-side-only corrections):** **49/49**, exit `0`. Only
+    `tests/diagnose.test.js` changed between the rounds; the eleven other selected hashed paths,
+    including the source files selected by the batch, are byte-identical. **The eight round-1 failures are preserved in
+    the record** — a later 49/49 does not show the implementation is free of bugs.
+  - Per-case breakdown, command, argv, hashes and envelope numbers:
+    [testing record](../../docs/testing/2026-11-08-unified-diagnostics.md).
+- **A fixed defect with no executed evidence.** A validator-wiring defect (lane name vs.
+  assembler option key) was found by static reading and corrected **before** the first run. The
+  defective form was never executed anywhere, so no artifact shows it or the failure it would
+  have produced; what the wiring case establishes is the current mapping only.
+- **The modules it orchestrates do have their own records:** the profile summarizer is `65/65`
+  (§12.7) and the combined report has its own bounded acceptance (§ above). Those records do not
+  transfer: they say nothing about this file's control flow, its exit mapping or its tests.
+- **Scope of the 49/49 — deliberately narrow.** The cases drive `main(argv, io)` in-process with
+  injected sinks and real temporary files, and load a **synthetic** validator module by absolute
+  path through dynamic `import()`. There is **no CLI subprocess**, **no real protocol
+  validator**, **no host** and **no full-suite run**: the workload names
+  `tests/diagnose.test.js` explicitly, so the `tests/*.test.js` `tests/*.test.mjs` suite total
+  above (§3) does not include it and is not implied to be green.
+- **Boundaries still pending:** cross-Node-version behaviour, CLI subprocess behaviour, a real
+  protocol validator as the injected dependency, and any host-scale dump. Nothing in this section
+  is authorization for an unbounded run, and the recorded two-round batch is not authorization
+  for a different envelope.

@@ -14,7 +14,8 @@
     "dsh-compat-admission": "./src/admission-cli.js",
     "dsh-compat-report": "./src/combined-cli.js",
     "dsh-compat-compare": "./src/compare-cli.js",
-    "dsh-compat-profile-dump": "./src/profile-dump-cli.js"
+    "dsh-compat-profile-dump": "./src/profile-dump-cli.js",
+    "dsh-compat-diagnose": "./src/diagnose-cli.js"
   },
   "exports": {
     ".": {
@@ -41,6 +42,11 @@
       "default": "./src/profile-dump.js"
     },
     "./profile-dump-cli": "./src/profile-dump-cli.js",
+    "./diagnose": {
+      "types": "./src/diagnose.d.ts",
+      "default": "./src/diagnose.js"
+    },
+    "./diagnose-cli": "./src/diagnose-cli.js",
     "./package.json": "./package.json"
   },
   "files": [
