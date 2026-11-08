@@ -1,11 +1,14 @@
-# `dsh-compat-repair` — typed plans, a preview, and no way to apply anything
+# `dsh-compat-repair` — typed plans, a preview, and an apply confined to one directory
 
-This package is the inert half of "approved repair". It can describe a change to one
-boolean field on one entry of an entry-list profile, and it can render what that change
-would look like. It cannot make the change: there is no apply function, no writer, no
-CLI that touches a file, and no network or subprocess code anywhere in it.
+This package carries "approved repair" from a description to a single, receipted write.
+It can describe a change to one boolean field on one entry of an entry-list profile,
+render what that change would look like, take a digest-bound approval record, and then —
+only inside a directory the caller names — perform the write and report what it observed.
 
-Status: `0.0.0-draft.1`. Two modules, twenty-five tests, zero dependencies.
+Nothing here authenticates an approver, resolves anything, or loads a profile. The
+package has no network and no subprocess code.
+
+Status: `0.0.0-draft.1`. Five modules, forty-two tests, zero dependencies.
 
 ## What is here
 
@@ -13,8 +16,12 @@ Status: `0.0.0-draft.1`. Two modules, twenty-five tests, zero dependencies.
 | --- | --- |
 | `src/repair-plan.js` | `repair-plan/0.1-draft.1` schema, closed key sets, one-element operation vocabulary, validator, canonical digest. |
 | `src/repair-preview.js` | Reads a plan and a document's **text** in memory, verifies the precondition digest, renders a two-line diff, and says whether the postcondition digest would follow. Never writes. |
-| `tests/repair.test.js` | 25 pure tests: schema closure, vocabulary width, stale refusal, unknown operation, preview text, no-writer assertions. |
-| `../../examples/repair/` | A synthetic three-entry profile, one plan against it, and `preview.mjs`, which prints the preview. |
+| `src/repair-approval.js` | `repair-approval/0.1-draft.1`: a digest-bound approval for one exact plan, `allow`/`deny`, expiry, nine closed issue codes. Validates bytes; verifies no identity. |
+| `src/repair-apply.js` | The pure decision (`decideApply`) and the frozen receipt (`repair-receipt/0.1-draft.1`, thirteen closed keys, ten reason codes, six limitations). Writes nothing. |
+| `src/fixture-applier.js` | **The only module that writes.** Refuses any path outside the fixture root it was given, copies the file before writing, writes, then re-reads to see what actually landed. `restoreFixture` puts the copy back. |
+| `tests/repair.test.js` | Schema closure, vocabulary width, stale refusal, unknown operation, preview text; asserts the pure modules export no writer and the applier is the only writer. |
+| `tests/repair-apply.test.js` | 17 tests: approval schema, expiry, denial, digest binding, stale plan, confinement, applied, partial, recovery. |
+| `../../examples/repair/` | A synthetic three-entry profile, one plan against it, `preview.mjs` (prints the preview), and `four-paths.mjs` (expired / denied / partial / recovery on a temporary copy). |
 
 ## The plan shape
 
@@ -69,8 +76,28 @@ rather than silently widened.
 - That a plan came from a trusted author: a digest pins bytes, not authority.
 - That the profile it names is loadable, or that the field it sets has the effect a
   reader might assume.
-- That anything was changed. This delivery has no apply path; the string
-  `nothing was written; no apply path exists` is printed by every preview.
+- That anything beyond one document changed. `restoreFixture` rewrites one file from the
+  byte copy taken before the write; it is not a rollback of anything else, and no receipt
+  claims that.
+- That an approval came from a person: a caller who can write the approval file can
+  approve anything, so the receipt prints `approver: <label as written>` and never
+  "verified".
+
+## The apply path
+
+`decideApply` refuses before any byte is written unless the plan validates, the approval
+validates, the approval names **this** plan digest, the approval has not lapsed, the
+decision is `allow`, and the preview says `ready` against the document in hand. Then
+`applyApproved` copies the file to `<name>.before`, writes the exact text the preview
+showed, re-reads the file, and returns
+
+- `applied` when the observed digest equals the postcondition,
+- `partial` when it does not — a real state, with both digests in the receipt,
+- `refused` for every failure before the write, with `wrote: false`.
+
+`examples/repair/four-paths.mjs` demonstrates all four outcomes on a temporary copy and
+exits non-zero unless the four receipts are distinguishable and the two refusals left the
+document untouched.
 
 ## Running it
 

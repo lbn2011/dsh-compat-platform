@@ -10,7 +10,9 @@
 #   2. Does the package's own suite pass, unmodified, under the envelope, and does
 #      the shipped example preview render without writing anything?
 #
-# No repair is applied by this batch: there is no apply path to call.
+# No repair is applied to any checkout file by this batch. Step 5d exercises the
+# approval/apply paths on a temporary copy inside the sandbox's private /tmp, and the
+# batch compares the checkout fixture's digest before and after to prove it.
 #
 # Usage:  bash projects/dsh-compat-platform/scripts/repair-plan-batch/run.sh
 #         Takes no arguments.
@@ -54,10 +56,15 @@ HASHED=(
   "$PKG/README.md"
   "$PKG/src/repair-plan.js"
   "$PKG/src/repair-preview.js"
+  "$PKG/src/repair-approval.js"
+  "$PKG/src/repair-apply.js"
+  "$PKG/src/fixture-applier.js"
   "$PKG/tests/repair.test.js"
+  "$PKG/tests/repair-apply.test.js"
   "$REPO/examples/repair/profile.yml"
   "$REPO/examples/repair/plan.json"
   "$REPO/examples/repair/preview.mjs"
+  "$REPO/examples/repair/four-paths.mjs"
 )
 TEST_FILES=(
   tests/repair.test.js

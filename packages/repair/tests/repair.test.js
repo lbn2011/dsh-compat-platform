@@ -266,18 +266,34 @@ test('every advertised code is a string constant, and the lists are closed and f
   assert.ok(Object.isFrozen(PLAN_LIMITATIONS));
   assert.ok(PLAN_ISSUE_CODES.every((code) => typeof code === 'string' && code.startsWith('PLAN_')));
   assert.ok(PREVIEW_ISSUE_CODES.every((code) => code.startsWith('PREVIEW_')));
-  assert.ok(PLAN_LIMITATIONS.includes('NO_APPLY_PATH_EXISTS_IN_THIS_DELIVERY'));
+  assert.ok(PLAN_LIMITATIONS.includes('APPLY_PATH_IS_CONFINED_TO_A_FIXTURE_DIRECTORY'));
+  assert.ok(!PLAN_LIMITATIONS.includes('NO_APPLY_PATH_EXISTS_IN_THIS_DELIVERY'));
   for (const list of [PLAN_ISSUE_CODES, PREVIEW_ISSUE_CODES]) {
     assert.equal(new Set(list).size, list.length, 'codes must be unique');
   }
 });
 
-test('the package exposes no writer and no apply path', async () => {
-  const planModule = await import('../src/repair-plan.js');
-  const previewModule = await import('../src/repair-preview.js');
+test('the pure modules export no writer', async () => {
+  const pure = await Promise.all([
+    import('../src/repair-plan.js'),
+    import('../src/repair-preview.js'),
+    import('../src/repair-approval.js'),
+    import('../src/repair-apply.js'),
+  ]);
   const forbidden = /^(apply|write|save|commit|install|exec|run)/i;
-  for (const [name, value] of [...Object.entries(planModule), ...Object.entries(previewModule)]) {
-    if (typeof value !== 'function') continue;
-    assert.ok(!forbidden.test(name), `export ${name} looks like a writer`);
+  for (const module of pure) {
+    for (const [name, value] of Object.entries(module)) {
+      if (typeof value !== 'function') continue;
+      assert.ok(!forbidden.test(name), `export ${name} looks like a writer`);
+    }
   }
+});
+
+test('the only writer in the package is the fixture applier', async () => {
+  const applier = await import('../src/fixture-applier.js');
+  const writerNames = Object.keys(applier).filter((name) => typeof applier[name] === 'function'
+    && /^(apply|write|restore|save|commit)/i.test(name));
+  assert.deepEqual(writerNames.sort(), ['applyApproved', 'restoreFixture']);
+  assert.equal(applier.MAX_FIXTURE_BYTES, 1024 * 1024);
+  assert.equal(Object.isFrozen(applier.CONFINEMENT_REASONS), true);
 });

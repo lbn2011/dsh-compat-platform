@@ -35,7 +35,7 @@ EXPECT_PIDS=32
 EXPECT_CPU_MAX='50000 100000'   # 50% of one CPU
 EXPECT_RUNTIME_USEC=120000000
 EXPECT_MEMAVAILABLE_KIB=819200
-EXPECT_EXPORTS="|./src/repair-plan.js|./src/repair-preview.js|"
+EXPECT_EXPORTS="|./src/repair-plan.js|./src/repair-preview.js|./src/repair-approval.js|./src/repair-apply.js|./src/fixture-applier.js|"
 EXPECT_PLAN_VERSION='repair-plan/0.1-draft.1'
 
 write_fail=0
@@ -253,15 +253,29 @@ say(`operation_vocabulary_width=${plan.OPERATION_KINDS.length}`);
 if (plan.OPERATION_KINDS.length !== 1) fail.push('vocabulary-width');
 say(`flag_fields=${plan.FLAG_FIELDS.join(',')}`);
 if (plan.FLAG_FIELDS.join(',') !== 'disabled') fail.push('flag-fields');
-say(`no_apply_limitation=${plan.PLAN_LIMITATIONS.includes('NO_APPLY_PATH_EXISTS_IN_THIS_DELIVERY') ? 'pass' : 'fail'}`);
-if (!plan.PLAN_LIMITATIONS.includes('NO_APPLY_PATH_EXISTS_IN_THIS_DELIVERY')) fail.push('no-apply-limitation');
+say(`confined_apply_limitation=${plan.PLAN_LIMITATIONS.includes('APPLY_PATH_IS_CONFINED_TO_A_FIXTURE_DIRECTORY') ? 'pass' : 'fail'}`);
+if (!plan.PLAN_LIMITATIONS.includes('APPLY_PATH_IS_CONFINED_TO_A_FIXTURE_DIRECTORY')) fail.push('confined-apply-limitation');
+say(`stale_no_apply_claim=${plan.PLAN_LIMITATIONS.includes('NO_APPLY_PATH_EXISTS_IN_THIS_DELIVERY') ? 'fail' : 'pass'}`);
+if (plan.PLAN_LIMITATIONS.includes('NO_APPLY_PATH_EXISTS_IN_THIS_DELIVERY')) fail.push('stale-no-apply-claim');
 
-// No export may look like a writer: this delivery has no apply path at all.
+// The pure modules must export no writer at all; the single writer is the applier.
+const approval = await import(join(pkgDir, 'src/repair-approval.js'));
+const apply = await import(join(pkgDir, 'src/repair-apply.js'));
+const applier = await import(join(pkgDir, 'src/fixture-applier.js'));
 const forbidden = /^(apply|write|save|commit|install|exec|run)/i;
-for (const [name, value] of [...Object.entries(plan), ...Object.entries(preview)]) {
-  if (typeof value !== 'function') continue;
-  if (forbidden.test(name)) { say(`writer_export ${name}=fail`); fail.push(`writer:${name}`); }
+for (const [moduleName, module] of Object.entries({ plan, preview, approval, apply })) {
+  for (const [name, value] of Object.entries(module)) {
+    if (typeof value !== 'function') continue;
+    if (forbidden.test(name)) { say(`writer_export ${moduleName}.${name}=fail`); fail.push(`writer:${moduleName}.${name}`); }
+  }
 }
+const writers = Object.keys(applier)
+  .filter((name) => typeof applier[name] === 'function' && /^(apply|write|restore|save|commit)/i.test(name))
+  .sort();
+say(`applier_writers=${writers.join(',') || 'none'}`);
+if (writers.join(',') !== 'applyApproved,restoreFixture') fail.push('applier-writers');
+say(`applier_byte_ceiling=${applier.MAX_FIXTURE_BYTES}`);
+if (applier.MAX_FIXTURE_BYTES !== 1048576) fail.push('applier-ceiling');
 
 say(`static_contract=${fail.length === 0 ? 'pass' : 'fail'}`);
 say(`static_contract_failures=${fail.join(',') || 'none'}`);
@@ -317,6 +331,35 @@ printf 'example_rc=%s\nexample_verdict=%s\nfixture_before=%s\nfixture_after=%s\n
   "$example_rc" "$example_verdict" "${example_before:-<unreadable>}" "${example_after:-<unreadable>}" \
   > "$RUN/example-verdict.txt" || addwf example-verdict.txt
 [ "$example_verdict" = pass ] || die 72 "example preview did not behave ($example_verdict)"
+
+# ---------------------------------------------------------------- 5d. four paths
+# The approval and apply paths are exercised on a **copy** of the example fixture inside
+# the sandbox's private /tmp. Four outcomes must be distinguishable, the two refusals must
+# leave the copy untouched, and the example fixture in the checkout must not change.
+if [ "$write_fail" -ne 0 ]; then evidence_stop before-four-paths; fi
+fp_fixture=$REPO/examples/repair/profile.yml
+fp_before=$(sha256sum "$fp_fixture" 2>/dev/null | awk '{print $1}')
+bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
+  --unshare-pid --unshare-net --unshare-ipc --unshare-uts --die-with-parent \
+  --chdir "$REPO" \
+  -- /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp \
+     NODE_OPTIONS=--max-old-space-size=192 \
+     "$NODE" examples/repair/four-paths.mjs \
+  > "$RUN/four-paths.txt" 2> "$RUN/four-paths.err"
+fp_rc=$?
+fp_after=$(sha256sum "$fp_fixture" 2>/dev/null | awk '{print $1}')
+four_verdict=pass
+[ "$fp_rc" -eq 0 ] || four_verdict="rc_$fp_rc"
+grep -q '^four-paths: pass ' "$RUN/four-paths.txt" || four_verdict=fail_not_pass
+grep -q '"status": "refused"' "$RUN/four-paths.txt" || four_verdict=fail_no_refusal
+grep -q '"status": "partial"' "$RUN/four-paths.txt" || four_verdict=fail_no_partial
+grep -q '"status": "restored"' "$RUN/four-paths.txt" || four_verdict=fail_no_recovery
+grep -q '"untouched": true' "$RUN/four-paths.txt" || four_verdict=fail_touched
+[ -n "$fp_before" ] && [ "$fp_before" = "$fp_after" ] || four_verdict=fixture_changed
+printf 'four_paths_rc=%s\nfour_paths_verdict=%s\nfixture_before=%s\nfixture_after=%s\n' \
+  "$fp_rc" "$four_verdict" "${fp_before:-<unreadable>}" "${fp_after:-<unreadable>}" \
+  > "$RUN/four-paths-verdict.txt" || addwf four-paths-verdict.txt
+[ "$four_verdict" = pass ] || die 72 "four-path demonstration did not behave ($four_verdict)"
 
 # ---------------------------------------------------------------- 6. the workload
 say 'payload: starting the workload'
@@ -410,6 +453,7 @@ if [ "$verdict" = pass ]; then
 fi
 [ "$node_rc" -eq 0 ] || verdict="node_rc:${node_rc}"
 if [ "$verdict" = pass ] && [ "$example_verdict" != pass ]; then verdict="example_${example_verdict}"; fi
+if [ "$verdict" = pass ] && [ "$four_verdict" != pass ]; then verdict="four_paths_${four_verdict}"; fi
 printf 'tests_exit=%s\nverdict=%s\n' "$node_rc" "$verdict" > "$RUN/tap-verdict.txt" || addwf tap-verdict.txt
 
 if [ "$write_fail" -ne 0 ]; then

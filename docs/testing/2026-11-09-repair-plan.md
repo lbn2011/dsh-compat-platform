@@ -1,7 +1,12 @@
 # Acceptance record — repair plan and preview (S3, the inert half of P4)
 
-**Status: executed, two bounded rounds, both green.** No repair has ever been applied by
-this code, and the code to apply one does not exist.
+**Status: executed, two bounded rounds, both green.** At the time of measurement no repair
+had ever been applied by this code, and the code to apply one did not exist.
+
+> **Later change (2026-11-09).** S4 added the approval and apply modules, so this record no
+> longer depicts the shipped package: the `NO_APPLY_PATH_EXISTS_IN_THIS_DELIVERY` limitation it
+> quotes was replaced, and the test count is now 42. The figures below describe the earlier
+> bytes and are neither retracted nor additive. See `docs/testing/2026-11-09-repair-apply.md`.
 
 ## 0. Scope and non-claims
 

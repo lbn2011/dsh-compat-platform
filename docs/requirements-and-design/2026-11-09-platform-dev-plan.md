@@ -91,7 +91,10 @@ schema, a validator, and a preview — but no apply path yet.
   was computed against; a mismatch is `PLAN_STALE` and stops before any writer exists.
 - `packages/repair/src/repair-preview.js`: renders the diff as text, never writes. Its output is data
   for the GUI later, not a new endpoint.
-- No CLI that writes, no apply function. `apply` arrives in S5 only if S3 and S4 both land.
+- No CLI that writes, no apply function. *(Amended 2026-11-09: S4 delivered the apply
+  path after all, because the gate for S4 required exercising four apply outcomes. It is a
+  library call confined to a caller-named fixture directory — still no CLI that writes, and
+  production paths remain out of scope.)*
 
 Gate: pure tests only (plan validation, stale refusal, unknown-operation refusal, preview text);
 no file outside the test temp directory is ever written; the record says plainly that no repair has
@@ -112,6 +115,17 @@ is stronger in the delivered code: the package performs no file I/O at all, whic
 
 Gate: the four paths each produce a distinct receipt; no mutation occurs before approval; the record
 states that backup is not presented as rollback.
+
+**Status 2026-11-09: done.** `packages/repair/src/repair-approval.js`, `repair-apply.js` and
+`fixture-applier.js` implement the approval record, the pure decision, the receipt and a
+write-then-verify apply that refuses any path outside the fixture root it is handed. The four
+paths ran on a temporary copy of `examples/repair/profile.yml` inside two bounded rounds
+(42/42 tests, `expired`/`denied` refused with `wrote: false` and an unchanged digest,
+`partial` with both digests recorded, `recovery` back to the original digest). Evidence:
+`docs/testing/2026-11-09-repair-apply.md`. The S3 limitation
+`NO_APPLY_PATH_EXISTS_IN_THIS_DELIVERY` was replaced by
+`APPLY_PATH_IS_CONFINED_TO_A_FIXTURE_DIRECTORY`, because an apply path now exists and the old
+sentence would be false.
 
 ### S5 — P5 packaging verification  *(no publication decision needed)*
 

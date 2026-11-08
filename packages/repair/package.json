@@ -3,7 +3,7 @@
   "version": "0.0.0-draft.1",
   "private": true,
   "type": "module",
-  "description": "Typed repair plans and a preview that never writes. No apply path exists.",
+  "description": "Typed repair plans, a preview that never writes, and an apply confined to one fixture directory.",
   "engines": {
     "node": ">=24.9.0"
   },
@@ -12,6 +12,9 @@
     ".": "./src/repair-plan.js",
     "./repair-plan": "./src/repair-plan.js",
     "./repair-preview": "./src/repair-preview.js",
+    "./repair-approval": "./src/repair-approval.js",
+    "./repair-apply": "./src/repair-apply.js",
+    "./fixture-applier": "./src/fixture-applier.js",
     "./package.json": "./package.json"
   },
   "scripts": {

@@ -147,6 +147,7 @@ function findField(lines, record, field) {
  *   beforeDigest: string | null,
  *   afterDigest: string | null,
  *   diff: {line: number, removed: string | null, added: string} | null,
+ *   afterText: string | null,
  *   limitations: ReadonlyArray<string>,
  * }} A frozen, self-describing verdict. Never throws for JSON values.
  */
@@ -160,6 +161,7 @@ export function previewRepair({ plan, beforeText } = {}) {
       beforeDigest: null,
       afterDigest: null,
       diff: null,
+      afterText: null,
       limitations,
     });
   }
@@ -170,6 +172,7 @@ export function previewRepair({ plan, beforeText } = {}) {
       beforeDigest: null,
       afterDigest: null,
       diff: null,
+      afterText: null,
       limitations,
     });
   }
@@ -182,6 +185,7 @@ export function previewRepair({ plan, beforeText } = {}) {
       beforeDigest: null,
       afterDigest: null,
       diff: null,
+      afterText: null,
       limitations,
     });
   }
@@ -194,6 +198,7 @@ export function previewRepair({ plan, beforeText } = {}) {
       beforeDigest,
       afterDigest: null,
       diff: null,
+      afterText: null,
       limitations,
     });
   }
@@ -207,6 +212,7 @@ export function previewRepair({ plan, beforeText } = {}) {
       beforeDigest,
       afterDigest: null,
       diff: null,
+      afterText: null,
       limitations,
     });
   }
@@ -219,6 +225,7 @@ export function previewRepair({ plan, beforeText } = {}) {
       beforeDigest,
       afterDigest: null,
       diff: null,
+      afterText: null,
       limitations,
     });
   }
@@ -229,6 +236,7 @@ export function previewRepair({ plan, beforeText } = {}) {
       beforeDigest,
       afterDigest: null,
       diff: null,
+      afterText: null,
       limitations,
     });
   }
@@ -253,11 +261,20 @@ export function previewRepair({ plan, beforeText } = {}) {
       beforeDigest,
       afterDigest,
       diff,
+      afterText: null,
       limitations,
     });
   }
 
-  return freeze({ verdict: 'ready', reasons: [], beforeDigest, afterDigest, diff, limitations });
+  return freeze({
+    verdict: 'ready',
+    reasons: [],
+    beforeDigest,
+    afterDigest,
+    diff,
+    afterText,
+    limitations,
+  });
 }
 
 /**
