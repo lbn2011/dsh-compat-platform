@@ -3,12 +3,35 @@
   "version": "0.0.0-prepared",
   "private": true,
   "type": "module",
-  "description": "Prepared dependency boundary for a future full JSON Schema 2020-12 checker; separate from the zero-dependency spec",
+  "description": "Configuration contract checking for the DSH compatibility protocol: a JSON Schema 2020-12 instance check over an acquired, unpatched engine, with explicit not-checked outcomes.",
   "engines": {
     "node": ">=24.9.0"
   },
   "dependencies": {
     "@hyperjump/browser": "1.6.0",
     "@hyperjump/json-schema": "1.18.0"
+  },
+  "main": "./src/config-check.js",
+  "files": [
+    "src/",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/config-check.d.ts",
+      "default": "./src/config-check.js"
+    },
+    "./engine": {
+      "types": "./src/hyperjump-engine.d.ts",
+      "default": "./src/hyperjump-engine.js"
+    },
+    "./cli": "./src/config-check-cli.js",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "dsh-compat-config-check": "./src/config-check-cli.js"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 \"tests/*.test.js\""
   }
 }

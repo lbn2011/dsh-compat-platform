@@ -1,0 +1,1 @@
+{ "retries": 2, "mode": "safe", "endpoint": "https://example.test/hook" }
