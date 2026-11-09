@@ -34,13 +34,13 @@ These are four different scopes. They are not additive, and none of them is a ce
 
 | # | Item | Why it is still open | Cost of leaving it |
 | --- | --- | --- | --- |
-| U1 | Configuration mismatch (gap G9) | needs an identity decision: rows and declarations currently share no attributable key | one whole analysis stays impossible |
-| U2 | Failure-phase honesty | import-vs-activation is read by re-importing the module, which runs side effects twice | a reviewer may read the phase word as a clean observation |
-| U3 | Gate 4 (time budget) | only arithmetic; no fixture has ever been killed | the one failure path most likely in practice is untested |
-| U4 | Network denial | rests on `--unshare-net`, not on an observed refusal from the child | a reader may think the child proved it |
-| U5 | Admission validator import path | spec exports only `.`, `./schema`, `./package.json`; consumers reach `validateAdmissionEvidence` by file path | every consumer hard-codes a sibling layout |
-| U6 | P4 approved repair | requirement exists, nothing typed or previewable | the platform can only describe, never correct |
-| U7 | P5 matrix and packaging | single pinned baseline, private packages, no tarball installation check | no defensible support claim |
+| U1 | Configuration mismatch (gap G9) | open — blocked on an identity decision (D-A): profile rows and declarations share no attributable key, and no work has been attempted | one whole analysis stays impossible |
+| U2 | Failure-phase honesty | open — the phase word is read by re-importing the module (`failurePhase` in `packages/runtime/src/trusted-extraction-adapter.js`), so side effects run twice; disclosed as limitation `FAILURE_PHASE_READ_BY_REIMPORT` | a reviewer may read the phase word as a clean observation |
+| U3 | Gate 4 (time budget) | partly addressed — a 3-second demo budget killed a wedged fixture: SIGKILL, status `incomplete`, cleanup `unconfirmed`, `process.timedOut` true (record `docs/testing/2026-11-09-trusted-extraction-failure-paths.md`); what remains: the shipped 80-second budget (120 > 80 + 10 + 20) is still arithmetic only | the failure path most likely in practice is unexercised where it ships |
+| U4 | Network denial | closed by S1 — the verdict now comes from the child's own connect attempt and errno, via `networkVerdict()` in `packages/runtime/src/isolation-policy.js`; the bounded round observed `ENETUNREACH`; residual: other errno classes are classified but unobserved (record `docs/testing/2026-11-09-trusted-extraction-failure-paths.md`) | only the unobserved errno classes remain argued rather than measured |
+| U5 | Admission validator import path | closed by S2 — spec publishes the `./admission-evidence` subpath (commit `0ea745a5`), and the platform resolves the grammar by package name in `packages/analyzer/tests/helpers/spec-module.mjs` (commit `b6594458`); no residual (94/94, four bounded rounds, `projects/dsh-compat-spec/docs/testing/2026-11-09-admission-evidence-export.md`) | nothing left to pay |
+| U6 | P4 approved repair | partly closed — S3 delivered repair-plan/0.1-draft.1 with a text-only preview (25/25, commit `5f80b45`); S4 delivered digest-bound approval, a confined apply and receipts on four demonstrated paths (42/42, commit `2e477c2`); what remains: no CLI writes, nothing outside a caller-named fixture directory has been touched, and a backup is not a rollback | repair has still never left a fixture directory |
+| U7 | P5 matrix and packaging | partly closed — S5 installed five tarballs into a consumer directory with no sibling checkout: 24 probe checks plus a deliberate missing dependency failing loudly with `ERR_MODULE_NOT_FOUND` (commit `d6e6550`, record `docs/testing/2026-11-09-package-install.md`); what remains: all four packages are `"private": true`, the tarball `files` list has never been audited, and there is still one pinned host version | no defensible support claim |
 
 ## 3. Slice sequence
 
