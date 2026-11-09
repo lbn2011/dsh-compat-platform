@@ -91,6 +91,23 @@ Runner records must identify wrapper/core/policy hashes, requested and effective
 3. Core distribution: selected pinned identical repository-local copies after architecture review (§4.2); manifest ABI and sync/check implementation remain to be specified.
 4. Schema envelope API and revision dispatch: specified in §4.1 and implemented for review; legacy/generated-schema regression verification remains pending.
 
+### Status 2026-11-10: checker implemented and verified
+
+`packages/config-check` exists and is measured: 54 unit tests, three CLI cases
+(`0` valid, `1` invalid with key-path findings, `2` not-checked on an affected
+schema literal), two green bounded rounds, leak assertion clean. The shared core
+gained `config-check-batch` in `br_prefix_allowed` and `BR_UNIT_FAMILIES`, and
+`core.manifest` was refreshed to the new `policy.sh` digest, so earlier rounds
+against the previous policy bytes are labelled superseded in the record.
+
+Two scope boundaries are now explicit rather than implied:
+
+- The checker takes a schema (or a declaration carrying `configSchema`) plus an
+  **instance document**. Extracting a configuration value out of a profile is a
+  separate disclosure decision and is **not** implemented here.
+- The engine defect is declined, not fixed: an affected literal yields
+  `not-checked`, never a verdict.
+
 ## 8. Landing and staged commits
 
 1. Commit researched design/inventory with pending items explicitly marked.

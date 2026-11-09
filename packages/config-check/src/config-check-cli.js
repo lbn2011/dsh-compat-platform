@@ -2,6 +2,7 @@
 // CLI for the configuration checker.
 //
 //   config-check <schema.json> <instance.json> [--entry-label <word>]
+//   config-check --declaration <declaration.json> <instance.json> [--entry-label <word>]
 //
 // Reads two JSON files, judges the instance against the schema, prints one JSON
 // summary on stdout. No configuration value is ever printed; findings carry a
@@ -12,10 +13,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { checkConfiguration, configCheckExitCode, CONFIG_CHECK_EXIT } from '../src/config-check.js';
+import { checkConfiguration, configCheckExitCode, schemaFromDeclaration, CONFIG_CHECK_EXIT } from '../src/config-check.js';
 import { createEngine } from '../src/hyperjump-engine.js';
 
-const USAGE = 'usage: config-check <schema.json> <instance.json> [--entry-label <word>]';
+const USAGE =
+  'usage: config-check <schema.json> <instance.json> [--entry-label <word>]\n' +
+  '       config-check --declaration <declaration.json> <instance.json> [--entry-label <word>]';
 
 const ENGINE_SPECIFIER = '@hyperjump/json-schema/draft-2020-12';
 
@@ -66,11 +69,17 @@ export async function main(argv, io = {}) {
   const args = argv.slice(2);
 
   let entryLabel = null;
+  let declarationPath = null;
   const positional = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === '--entry-label') {
       entryLabel = args[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    if (arg === '--declaration') {
+      declarationPath = args[index + 1] ?? '';
       index += 1;
       continue;
     }
@@ -80,16 +89,52 @@ export async function main(argv, io = {}) {
     }
     positional.push(arg);
   }
-  if (positional.length !== 2 || entryLabel === '') {
+  // In declaration mode the schema comes from the declaration, so only the
+  // instance is positional. Requiring two positionals there made every
+  // declaration-mode invocation exit 64 with usage, which is how this was found.
+  const expectedPositionals = declarationPath === null ? 2 : 1;
+  if (positional.length !== expectedPositionals || entryLabel === '' || declarationPath === '') {
     const written = await writeOnce(stderr, `${USAGE}\n`);
     return written ? CONFIG_CHECK_EXIT.USAGE : CONFIG_CHECK_EXIT.INTERNAL;
   }
 
-  const [schemaArg, instanceArg] = positional;
-  const schemaRead = readJson(schemaArg, 'schema');
-  if (schemaRead.error !== undefined) {
-    await writeOnce(stderr, `config-check: ${schemaRead.error}\n`);
-    return CONFIG_CHECK_EXIT.USAGE;
+  const [schemaArg, instanceArg] = declarationPath === null ? positional : [null, positional[0]];
+  let schemaValue;
+  if (declarationPath !== null) {
+    const declarationRead = readJson(declarationPath, 'declaration');
+    if (declarationRead.error !== undefined) {
+      await writeOnce(stderr, `config-check: ${declarationRead.error}\n`);
+      return CONFIG_CHECK_EXIT.USAGE;
+    }
+    let validateDeclaration;
+    try {
+      const specRoot = io.specRoot ?? process.env.CONFIG_CHECK_SPEC_ROOT;
+      const specifier = specRoot ? pathToFileURL(join(specRoot, 'src/index.js')).href : 'dsh-compat-spec';
+      ({ validateDeclaration } = await import(specifier));
+    } catch {
+      await writeOnce(stderr, 'config-check: the spec grammar could not be loaded\n');
+      return CONFIG_CHECK_EXIT.INTERNAL;
+    }
+    const extracted = schemaFromDeclaration(declarationRead.value, { validateDeclaration });
+    if (!extracted.ok) {
+      const writtenRefusal = await writeOnce(
+        stdout,
+        `${JSON.stringify(
+          { configCheckSummary: 'config-check-summary/0.1-draft.1', entryLabel, schemaStatus: 'refused', refusal: extracted.refusal, findings: [], counts: { checked: 0, invalid: 0, findings: 0, findingsTruncated: false }, certification: false },
+          null,
+          2,
+        )}\n`,
+      );
+      return writtenRefusal ? CONFIG_CHECK_EXIT.NOT_CHECKED : CONFIG_CHECK_EXIT.INTERNAL;
+    }
+    schemaValue = extracted.schema;
+  } else {
+    const schemaRead = readJson(schemaArg, 'schema');
+    if (schemaRead.error !== undefined) {
+      await writeOnce(stderr, `config-check: ${schemaRead.error}\n`);
+      return CONFIG_CHECK_EXIT.USAGE;
+    }
+    schemaValue = schemaRead.value;
   }
   const instanceRead = readJson(instanceArg, 'instance');
   if (instanceRead.error !== undefined) {
@@ -111,7 +156,7 @@ export async function main(argv, io = {}) {
   let result;
   try {
     result = await checkConfiguration({
-      schema: schemaRead.value,
+      schema: schemaValue,
       instance: instanceRead.value,
       engine,
       entryLabel,

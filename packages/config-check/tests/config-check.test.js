@@ -14,6 +14,7 @@ import {
   resolveKeywordPath,
   summarizeExpectation,
   renderPath,
+  schemaFromDeclaration,
 } from '../src/config-check.js';
 
 /**
@@ -452,4 +453,65 @@ test('renderPath renders key paths without values', () => {
   assert.equal(renderPath(['a', 'b']), 'config.a.b');
   assert.equal(renderPath(['items', 2, 'x']), 'config.items[2].x');
   assert.equal(renderPath([0]), 'config[0]');
+});
+
+test('schemaFromDeclaration requires an injected validator', () => {
+  assert.throws(() => schemaFromDeclaration({}, {}), TypeError);
+});
+
+test('schemaFromDeclaration returns the contract of a valid declaration', () => {
+  const contract = { $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object' };
+  const result = schemaFromDeclaration(
+    { schemaVersion: '0.2.0-draft.1', configSchema: contract },
+    { validateDeclaration: () => ({ valid: true, issues: [] }) },
+  );
+  assert.deepEqual(result, { ok: true, schema: contract });
+});
+
+test('a legacy declaration has no contract, and that is not an error', () => {
+  const result = schemaFromDeclaration(
+    { schemaVersion: '0.1.0-draft.1' },
+    { validateDeclaration: () => ({ valid: true, issues: [] }) },
+  );
+  assert.deepEqual(result, { ok: false, refusal: CONFIG_CHECK_REFUSALS.NO_CONFIG_CONTRACT });
+});
+
+test('an invalid declaration refuses before the contract is considered', () => {
+  const result = schemaFromDeclaration(
+    { schemaVersion: '0.2.0-draft.1', configSchema: true },
+    { validateDeclaration: () => ({ valid: false, issues: [{ code: 'NOPE', path: 'x' }] }) },
+  );
+  assert.deepEqual(result, { ok: false, refusal: CONFIG_CHECK_REFUSALS.DECLARATION_INVALID });
+});
+
+test('a validator that throws refuses rather than escaping', () => {
+  const result = schemaFromDeclaration(
+    { schemaVersion: '0.2.0-draft.1', configSchema: true },
+    { validateDeclaration: () => { throw new Error('boom'); } },
+  );
+  assert.deepEqual(result, { ok: false, refusal: CONFIG_CHECK_REFUSALS.DECLARATION_INVALID });
+});
+
+test('a boolean contract is carried as-is', () => {
+  const result = schemaFromDeclaration(
+    { schemaVersion: '0.2.0-draft.1', configSchema: false },
+    { validateDeclaration: () => ({ valid: true }) },
+  );
+  assert.deepEqual(result, { ok: true, schema: false });
+});
+
+test('a declaration without configSchema refuses with NO_CONFIG_CONTRACT', () => {
+  const legacy = { schemaVersion: '0.1.0-draft.1', plugin: { id: 'a.b', version: '1.0.0' } };
+  const result = schemaFromDeclaration(legacy, {
+    validateDeclaration: (value) => ({ valid: Object.hasOwn(value, 'configSchema') === false, issues: [] }),
+  });
+  assert.deepEqual(result, { ok: false, refusal: CONFIG_CHECK_REFUSALS.NO_CONFIG_CONTRACT });
+});
+
+test('a configSchema that is neither boolean nor object refuses as invalid', () => {
+  const result = schemaFromDeclaration(
+    { schemaVersion: '0.2.0-draft.1', configSchema: [] },
+    { validateDeclaration: () => ({ valid: true, issues: [] }) },
+  );
+  assert.deepEqual(result, { ok: false, refusal: CONFIG_CHECK_REFUSALS.DECLARATION_INVALID });
 });

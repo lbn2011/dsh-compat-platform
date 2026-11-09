@@ -11,6 +11,7 @@ readonly -a BR_UNIT_FAMILIES=(
   'repair-plan-batch-*' 'diagnose-real-wiring-*' 'diagnostics-gui-run-*'
   'diagnostics-gui-*' 'profile-dump-retained-export-*' 'profile-dump-install-*'
   'package-install-*' 'trusted-extraction-batch-*' 'spec-test-batch-*'
+  'config-check-batch-*'
   'driver-config-contract-batch-*' 'analyzer-test-script-batch-*'
   'profile-export-real-*' 'profile-export-main-unit-*' 'profile-export-unit-*'
   'profile-export-unit-split-*' 'profile-export-orchestration-unit-split-*'
@@ -20,7 +21,7 @@ readonly -a BR_UNIT_FAMILIES=(
 )
 br_prefix_allowed() {
   case "$1" in
-    profile-dump-batch|diagnose-batch|dependency-shape-batch|correspondence|correspondence-batch|repair-plan-batch|diagnose-real-wiring|diagnostics-gui|diagnostics-gui-run|profile-dump-retained-export|profile-dump-install|package-install|trusted-extraction-batch|spec-test-batch) return 0;;
+    profile-dump-batch|config-check-batch|diagnose-batch|dependency-shape-batch|correspondence|correspondence-batch|repair-plan-batch|diagnose-real-wiring|diagnostics-gui|diagnostics-gui-run|profile-dump-retained-export|profile-dump-install|package-install|trusted-extraction-batch|spec-test-batch) return 0;;
     *) return 1;;
   esac
 }

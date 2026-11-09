@@ -49,6 +49,8 @@ export const CONFIG_CHECK_REFUSALS = Object.freeze({
   SCHEMA_NOT_OBJECT: 'CONFIG_SCHEMA_NOT_AN_OBJECT',
   NOT_JSON_SCHEMA: 'CONFIG_SCHEMA_REJECTED_BY_ENGINE',
   ENGINE_FAILED: 'CONFIG_ENGINE_FAILED',
+  DECLARATION_INVALID: 'CONFIG_DECLARATION_INVALID',
+  NO_CONFIG_CONTRACT: 'CONFIG_DECLARATION_HAS_NO_CONTRACT',
 });
 
 /** Why a schema could not be judged at all (as opposed to judged invalid). */
@@ -331,4 +333,47 @@ export function configCheckExitCode(result) {
   if (result.schemaStatus === 'checked') return result.valid === true ? CONFIG_CHECK_EXIT.VALID : CONFIG_CHECK_EXIT.INVALID;
   if (result.schemaStatus === 'not-checked' || result.schemaStatus === 'refused') return CONFIG_CHECK_EXIT.NOT_CHECKED;
   throw new TypeError('configCheckExitCode(result): result does not carry a documented schemaStatus.');
+}
+
+/**
+ * Read the contract out of one declaration.
+ *
+ * The protocol revision `0.2.0-draft.1` adds `configSchema` to the declaration
+ * root; the legacy revision has no such field. This helper is the single place
+ * that decides what "the declaration carries a contract" means, so the CLI and
+ * any future caller cannot disagree.
+ *
+ * The validator is injected: this package never imports the spec package and
+ * never re-implements its grammar. A caller passes
+ * `{ validateDeclaration }` from `dsh-compat-spec`.
+ *
+ * @returns {{ok: true, schema: unknown} | {ok: false, refusal: string}}
+ */
+export function schemaFromDeclaration(declaration, options = {}) {
+  const validate = options.validateDeclaration;
+  if (typeof validate !== 'function') {
+    throw new TypeError('schemaFromDeclaration(declaration, {validateDeclaration}): a validator function is required.');
+  }
+  let validation;
+  try {
+    validation = validate(declaration);
+  } catch {
+    return { ok: false, refusal: CONFIG_CHECK_REFUSALS.DECLARATION_INVALID };
+  }
+  if (!isPlainObject(validation) || validation.valid !== true) {
+    return { ok: false, refusal: CONFIG_CHECK_REFUSALS.DECLARATION_INVALID };
+  }
+  if (!isPlainObject(declaration)) {
+    return { ok: false, refusal: CONFIG_CHECK_REFUSALS.DECLARATION_INVALID };
+  }
+  if (!Object.hasOwn(declaration, 'configSchema')) {
+    // A legacy declaration is valid without a contract. That is not a failure of
+    // the declaration; it is simply nothing to check, and the caller must say so.
+    return { ok: false, refusal: CONFIG_CHECK_REFUSALS.NO_CONFIG_CONTRACT };
+  }
+  const schema = declaration.configSchema;
+  if (typeof schema !== 'boolean' && !isPlainObject(schema)) {
+    return { ok: false, refusal: CONFIG_CHECK_REFUSALS.DECLARATION_INVALID };
+  }
+  return { ok: true, schema };
 }
