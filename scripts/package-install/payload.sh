@@ -62,17 +62,18 @@ evidence_stop() { # marker; the counter belongs to this shell
 package_install_payload() {
   say "payload: unit=$BR_UNIT run=$RUN"
 
-  # ------------------------------------------------------------ 0. arguments
+  # ------------------------------------------------------------ 0. envelope
+  # Identity, limits, receipt and the memory gate are the core's, and they are
+  # established BEFORE any subprocess; a non-zero return means the payload must not
+  # run a single workload subprocess.
+  br_envelope_enter "$BR_UNIT" "$BR_RUN" || return $?
+
+  # ------------------------------------------------------------ 1. preconditions
   [ -x "$NODE" ] || refuse 70 "node binary missing: $NODE"
   [ -x "$NPM" ] || refuse 70 "npm binary missing: $NPM"
   for d in analyzer host runtime repair; do
     [ -d "$REPO/packages/$d" ] || refuse 70 "package directory missing: $d"
   done
-
-  # ------------------------------------------------------------ 1. envelope
-  # Identity, limits, receipt and the memory gate are the core's; a non-zero
-  # return means the payload must not run a single workload subprocess.
-  br_envelope_enter "$BR_UNIT" "$BR_RUN" || return $?
 
   # ------------------------------------------------------------ 2. syntax
   br_evidence_gate || evidence_stop before-syntax
