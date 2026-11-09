@@ -10,6 +10,7 @@ CORE=$REPO/scripts/bounded-runner
 NODE=/www/server/nodejs/v24.21.0/bin/node
 NODE_PREFIX=/www/server/nodejs/v24.21.0
 # The one acquired engine tree named by the install run (README.md documents it).
+SPEC_ROOT=${CONFIG_CHECK_SPEC_ROOT:-/root/dsh-ecosystem-spec/projects/dsh-compat-spec}
 DEFAULT_ENGINE_ROOT=/data/dsh-ecosystem-test-artifacts/runs/20261109T184644Z-config-engine-install-1145262-32328/work/node_modules
 source "$CORE/common.sh" || exit 70
 source "$CORE/policy.sh" || exit 70
@@ -48,6 +49,30 @@ run_cli_case() { # case-name schema instance
   br_record "$RUN/case-$name.rc" 'case_rc=%s\n' "$rc" || return 73
   return "$rc"
 }
+# One CLI case in declaration mode: the contract comes from the declaration, and
+# the pair that binds that declaration to the entry comes from the correspondence.
+run_declaration_case() { # case-name declaration-path
+  local name=$1 declaration=$2 rc
+  br_evidence_gate || return 73
+  capture "$RUN/case-$name.stdout.json" "$RUN/case-$name.stderr.txt" \
+    bwrap --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib \
+    --symlink usr/lib64 /lib64 \
+    --ro-bind "$NODE_PREFIX" "$NODE_PREFIX" --ro-bind "$ENGINE" "$ENGINE" \
+    --ro-bind "$PKG" "$PKG" --ro-bind "$RUN" "$RUN" \
+    --ro-bind "$SPEC_ROOT" "$SPEC_ROOT" \
+    --dev /dev --proc /proc --tmpfs /tmp \
+    --unshare-pid --unshare-net --unshare-ipc --unshare-uts --die-with-parent \
+    --chdir "$PKG" \
+    -- /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp \
+    NODE_OPTIONS="$BR_NODE_OPTIONS" CONFIG_CHECK_ENGINE_ROOT="$ENGINE" \
+    CONFIG_CHECK_SPEC_ROOT="$SPEC_ROOT" \
+    "$NODE" "$PKG/src/config-check-cli.js" --declaration "$declaration" \
+    --correspondence "$RUN/case-$name.corr.json" --entry-id example-a \
+    "$PKG/examples/invalid.json"; rc=$?
+  br_record "$RUN/case-$name.rc" 'case_rc=%s\n' "$rc" || return 73
+  return "$rc"
+}
+
 check_case() { # mode case-name; 0 only when the summary matches the contract
   local mode=$1 name=$2 rc
   br_evidence_gate || return 73
@@ -62,7 +87,7 @@ config_check_payload() {
   local rc syntax_rc node_check_rc tap_rc tap_tests verdict engine_source
   local acc_syntax_run_sh_rc acc_syntax_payload_sh_rc node_check_bad
   local acc_node_check_cc acc_node_check_hj acc_node_check_cli acc_node_check_cc_test acc_node_check_hj_test
-  local valid_check_rc invalid_check_rc notchecked_check_rc case_state=pass leak_state=clean
+  local valid_check_rc invalid_check_rc notchecked_check_rc corr_check_rc case_state=pass leak_state=clean
   local leak_config leak_credential f hit
   source "$CORE/tap.sh" || return 70
   # Envelope first: no workload and no syntax subprocess before it.
@@ -138,7 +163,7 @@ config_check_payload() {
   # Normalisation is the core's strict singleton reader: duplicate, malformed or
   # missing fields are rejected there, before any field value is read back.
   br_tap_check "$RUN/unit/tap.log" "$rc"; tap_rc=$?
-  br_record "$RUN/unit/tap-check.txt" 'tap_check_rc=%s\nnode_rc=%s\nminimum_tests=46\n' "$tap_rc" "$rc" || :
+  br_record "$RUN/unit/tap-check.txt" 'tap_check_rc=%s\nnode_rc=%s\nminimum_tests=59\n' "$tap_rc" "$rc" || :
   for f in tests pass fail cancelled skipped todo; do
     hit=$(br_tap_value "$RUN/unit/tap.log" "$f") || hit='<invalid>'
     printf 'tap_field_%s=%s\n' "$f" "$hit" >> "$RUN/unit/tap-fields.txt" || br_write_failure unit/tap-fields.txt
@@ -175,6 +200,15 @@ if (mode === 'valid') {
   if (doc.schemaStatus !== 'not-checked') problems.push(`schemaStatus=${doc.schemaStatus}`);
   if (doc.notCheckedReason !== 'NOT_CHECKED_SCHEMA_LITERAL_HAS_IDENTIFIER') {
     problems.push(`notCheckedReason=${doc.notCheckedReason}`);
+  }
+} else if (mode === 'correspondence') {
+  say(`schema_status=${doc.schemaStatus}`);
+  say(`entry_label=${doc.entryLabel}`);
+  for (const item of Array.isArray(doc.findings) ? doc.findings : []) say(`finding_path=${item && item.path}`);
+  if (doc.schemaStatus !== 'checked') problems.push(`schemaStatus=${doc.schemaStatus}`);
+  if (doc.entryLabel !== 'example-a') problems.push(`entryLabel=${doc.entryLabel}`);
+  if (!Array.isArray(doc.findings) || doc.findings.length !== 1 || doc.findings[0].path !== 'config.retries') {
+    problems.push('correspondence findings did not match');
   }
 } else { problems.push(`unknown mode: ${mode}`); }
 if (problems.length > 0) { process.stderr.write(`case check failed: ${problems.join('; ')}\n`); process.exit(1); }
@@ -216,12 +250,46 @@ INSTANCE
   br_evidence_gate || return 73
   check_case notchecked notchecked; notchecked_check_rc=$?
   [ "$notchecked_check_rc" -eq 0 ] || return 73
-  br_record "$RUN/case-verdict.txt" 'acc_cases=%s\nvalid_check_rc=%s\ninvalid_check_rc=%s\nnotchecked_check_rc=%s\n' \
-    "$case_state" "$valid_check_rc" "$invalid_check_rc" "$notchecked_check_rc" || :
+  br_evidence_gate || return 73
+  # Fourth case: the contract is selected by an explicit correspondence pair
+  # rather than by being the only declaration on hand.
+  if ! cat > "$RUN/case-correspondence.decl.json" <<'DECL'
+{
+  "schemaVersion": "0.2.0-draft.1",
+  "plugin": { "id": "example.plugin-alpha", "version": "0.1.0" },
+  "capabilities": { "required": [], "optional": [] },
+  "resources": [],
+  "configSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": { "retries": { "type": "integer", "minimum": 0, "maximum": 5 } },
+    "additionalProperties": true
+  }
+}
+DECL
+  then br_write_failure case-correspondence.decl.json; return 73; fi
+  br_evidence_gate || return 73
+  if ! cat > "$RUN/case-correspondence.corr.json" <<'CORR'
+{
+  "correspondenceVersion": "profile-correspondence/0.1-draft.1",
+  "bindings": { "profileSha256": "placeholder-not-a-digest", "declarationSha256": "placeholder-not-a-digest" },
+  "pairs": [{ "entryId": "example-a", "pluginId": "example.plugin-alpha" }]
+}
+CORR
+  then br_write_failure case-correspondence.corr.json; return 73; fi
+  br_evidence_gate || return 73
+  run_declaration_case correspondence "$RUN/case-correspondence.decl.json"
+  rc=$?
+  if [ "$rc" -ne 1 ]; then br_record "$RUN/case-correspondence.verdict" 'case=correspondence\nverdict=fail\n' || :; return 73; fi
+  br_evidence_gate || return 73
+  check_case correspondence correspondence; corr_check_rc=$?
+  [ "$corr_check_rc" -eq 0 ] || return 73
+  br_record "$RUN/case-verdict.txt" 'acc_cases=%s\nvalid_check_rc=%s\ninvalid_check_rc=%s\nnotchecked_check_rc=%s\ncorrespondence_check_rc=%s\n' \
+    "$case_state" "$valid_check_rc" "$invalid_check_rc" "$notchecked_check_rc" "$corr_check_rc" || :
   br_evidence_gate || return 73
   # ---- step c: leak assertion over every case's stdout ----
   leak_config=absent leak_credential=absent
-  for f in "$RUN/case-valid.stdout.json" "$RUN/case-invalid.stdout.json" "$RUN/case-notchecked.stdout.json"; do
+  for f in "$RUN/case-valid.stdout.json" "$RUN/case-invalid.stdout.json" "$RUN/case-notchecked.stdout.json" "$RUN/case-correspondence.stdout.json"; do
     [ -f "$f" ] || { leak_state=missing; continue; }
     if grep -F -q -- 'not a uri' "$f"; then leak_config=present; fi
     if grep -F -q -- 'sk-live-SECRET' "$f"; then leak_credential=present; fi
@@ -232,10 +300,10 @@ INSTANCE
   br_evidence_gate || return 73
   verdict=pass
   [ "$tap_rc" -eq 0 ] || verdict=tap_fail
-  [ "$tap_tests" -ge 46 ] || verdict=tap_count
+  [ "$tap_tests" -ge 59 ] || verdict=tap_count
   [ "$case_state" = pass ] || verdict="case_$case_state"
   [ "$leak_state" = clean ] || verdict="leak_$leak_state"
-  br_record "$RUN/verdict.txt" 'acc_unit_tap=%s\nacc_cases=%s\nacc_leak=%s\nverdict=%s\ntap_check_rc=%s\ntap_tests=%s\nminimum_tests=46\n' \
+  br_record "$RUN/verdict.txt" 'acc_unit_tap=%s\nacc_cases=%s\nacc_leak=%s\nverdict=%s\ntap_check_rc=%s\ntap_tests=%s\nminimum_tests=59\n' \
     "$tap_rc" "$case_state" "$leak_state" "$verdict" "$tap_rc" "$tap_tests" || :
   br_evidence_gate || return 73
   [ "$leak_state" = clean ] || return 73

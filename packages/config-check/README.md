@@ -12,7 +12,13 @@ than installed as a dependency of this repository.
 
 ```
 config-check <schema.json> <instance.json> [--entry-label <word>]
+config-check --declaration <declaration.json> <instance.json>
+config-check --declaration <d.json> --correspondence <c.json> --entry-id <id> <instance.json>
 ```
+
+The third form is the one that does not guess: the declaration is bound to the
+entry by an explicit correspondence pair, and the pair is refused when it is
+missing, duplicated, or contradicts the declaration's own `plugin.id`.
 
 - `schema.json` — the contract a declaration carries (`configSchema` in protocol
   revision `0.2.0-draft.1`), a JSON Schema 2020-12 document.

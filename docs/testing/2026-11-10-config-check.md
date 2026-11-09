@@ -1,6 +1,6 @@
 # Config checker — bounded verification
 
-Status: **executed, four invocations, the last two green on identical inputs.**
+Status: **executed, six invocations, the last two green on identical inputs.**
 The first two were green against an earlier revision of the shared runner's
 policy module and are kept below, labelled superseded, because the control
 closure changed after they ran.
@@ -33,7 +33,7 @@ shared runner `scripts/bounded-runner` (ABI `bounded-runner/1`).
 | `packages/config-check/src/hyperjump-engine.js` | engine adapter: dialect handling, BASIC errors, format assertion |
 | `packages/config-check/src/config-check-cli.js` | CLI plus `--declaration` mode |
 | `packages/config-check/src/*.d.ts` | declarations |
-| `packages/config-check/tests/*.test.js` | 54 unit tests, fake engine only |
+| `packages/config-check/tests/*.test.js` | 59 unit tests, fake engine only |
 | `packages/config-check/examples/*.json` | one contract, one valid value, one invalid value |
 | `packages/config-check/README.md` | behaviour, result kinds, limits |
 | `scripts/config-check-batch/{run.sh,payload.sh,README.md}` | bounded runner triple |
@@ -49,6 +49,15 @@ shared runner `scripts/bounded-runner` (ABI `bounded-runner/1`).
 | 2 | `20261109T192022Z-config-check-batch-1179795-30700` | pre-family-add | pass | 54/54 | 0/1/2 | 35254272 | 16 | — |
 | 3 | `20261109T192107Z-config-check-batch-1180774-27046` | `67ab0cd1…` | pass | 54/54 | 0/1/2 | 38039552 | 16 | 1430840 |
 | 4 | `20261109T192118Z-config-check-batch-1181195-8371` | `67ab0cd1…` | pass | 54/54 | 0/1/2 | 36065280 | 16 | 1453040 |
+| 5 | `20261109T192611Z-config-check-batch-1186750-18190` | `67ab0cd1…` | pass | 59/59 | 0/1/2/1 | 37720064 | 16 | — |
+| 6 | `20261109T192633Z-config-check-batch-1187381-14975` | `67ab0cd1…` | pass | 59/59 | 0/1/2/1 | 38195200 | 16 | — |
+
+Rounds 5 and 6 add the **fourth** case: the contract is selected by an explicit
+correspondence pair (`entryId: example-a` → `pluginId: example.plugin-alpha`)
+instead of by passing the declaration directly. Measured: exit `1`,
+`schemaStatus: checked`, `entryLabel: example-a`, one finding on
+`config.retries`. `control-before.txt`, `selected-before.txt` and `verdict.txt`
+are byte-identical between the two rounds.
 
 Rounds 1 and 2 are **superseded**: `policy.sh` did not yet carry
 `config-check-batch` in `BR_UNIT_FAMILIES`, so the active-unit guard could not
@@ -134,10 +143,10 @@ package files:
 
 | file | sha256 |
 |---|---|
-| `src/config-check.js` | `91e00c230d1ed3043cf6e064de12963c3af65d96c925341ed549fcfa512eadfb` |
+| `src/config-check.js` | `08a10f63c52567d6c21caea9c8d070ce4bbd6918f1e8214aba367811ed807183` |
 | `src/hyperjump-engine.js` | `6985a559ca7691bc47981ce67588e2a4e91f23756dd082f7a568ee9ca577a1ea` |
-| `src/config-check-cli.js` | `470766fffd6b9d336096c5c24de85d1f315535d9676ab093e850da981cff50e6` |
-| `tests/config-check.test.js` | `237edbc5af15ffdc3399ac7b8ac2651831f2daa080854e200ceddda401880f48` |
+| `src/config-check-cli.js` | `14a7f94119e9b0a5ff507a3fd2292aec441b67f30b2546aeda5be480ec3cc200` |
+| `tests/config-check.test.js` | `9a6360daee81da2a48371c30ad05967acf473b7accb6e40ddcd85478929d45d7` |
 | `tests/hyperjump-engine.test.js` | `c949cc030dc84fc2729f6114201a30409c5000e8e4c4084c8d2d6765e4ddf031` |
 | `scripts/bounded-runner/policy.sh` | `67ab0cd1240058a3e96852007ac753b479edf06a7ad7ec5c466fc1d47d02d4ab` |
 

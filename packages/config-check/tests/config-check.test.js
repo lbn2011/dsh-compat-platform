@@ -15,6 +15,7 @@ import {
   summarizeExpectation,
   renderPath,
   schemaFromDeclaration,
+  selectContract,
 } from '../src/config-check.js';
 
 /**
@@ -514,4 +515,77 @@ test('a configSchema that is neither boolean nor object refuses as invalid', () 
     { validateDeclaration: () => ({ valid: true, issues: [] }) },
   );
   assert.deepEqual(result, { ok: false, refusal: CONFIG_CHECK_REFUSALS.DECLARATION_INVALID });
+});
+
+// ---- correspondence-based contract selection ----
+
+const correspondence = {
+  correspondenceVersion: 'profile-correspondence/0.1-draft.1',
+  bindings: { profileSha256: 'a'.repeat(64), declarationSha256: 'b'.repeat(64) },
+  pairs: [
+    { entryId: 'example-a', pluginId: 'example.plugin-alpha' },
+    { entryId: 'example-b', pluginId: 'example.plugin-beta' },
+  ],
+};
+const validDeclaration = {
+  schemaVersion: '0.2.0-draft.1',
+  plugin: { id: 'example.plugin-alpha', version: '0.1.0' },
+  configSchema: { $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object' },
+};
+const acceptingValidator = () => ({ valid: true, issues: [] });
+
+test('selectContract uses the asserted pair and labels the entry', () => {
+  const result = selectContract({
+    correspondence,
+    entryId: 'example-a',
+    declaration: validDeclaration,
+    validateDeclaration: acceptingValidator,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.entryLabel, 'example-a');
+  assert.equal(result.pluginId, 'example.plugin-alpha');
+});
+
+test('selectContract refuses an entry the correspondence does not mention', () => {
+  const result = selectContract({
+    correspondence,
+    entryId: 'example-z',
+    declaration: validDeclaration,
+    validateDeclaration: acceptingValidator,
+  });
+  assert.deepEqual(result, { ok: false, refusal: CONFIG_CHECK_REFUSALS.CORRESPONDENCE_ENTRY_NOT_FOUND });
+});
+
+test('selectContract refuses two assertions for one entry rather than choosing', () => {
+  const doubled = {
+    ...correspondence,
+    pairs: [...correspondence.pairs, { entryId: 'example-a', pluginId: 'example.plugin-gamma' }],
+  };
+  const result = selectContract({
+    correspondence: doubled,
+    entryId: 'example-a',
+    declaration: validDeclaration,
+    validateDeclaration: acceptingValidator,
+  });
+  assert.deepEqual(result, { ok: false, refusal: CONFIG_CHECK_REFUSALS.CORRESPONDENCE_ENTRY_AMBIGUOUS });
+});
+
+test('selectContract refuses when the assertion contradicts the declaration', () => {
+  const result = selectContract({
+    correspondence: { ...correspondence, pairs: [{ entryId: 'example-a', pluginId: 'example.plugin-beta' }] },
+    entryId: 'example-a',
+    declaration: validDeclaration,
+    validateDeclaration: acceptingValidator,
+  });
+  assert.deepEqual(result, { ok: false, refusal: CONFIG_CHECK_REFUSALS.CORRESPONDENCE_PLUGIN_MISMATCH });
+});
+
+test('selectContract refuses a correspondence with no pairs array', () => {
+  const result = selectContract({
+    correspondence: { pairs: 'nope' },
+    entryId: 'example-a',
+    declaration: validDeclaration,
+    validateDeclaration: acceptingValidator,
+  });
+  assert.deepEqual(result, { ok: false, refusal: CONFIG_CHECK_REFUSALS.CORRESPONDENCE_INVALID });
 });

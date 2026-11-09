@@ -13,7 +13,14 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { checkConfiguration, configCheckExitCode, schemaFromDeclaration, CONFIG_CHECK_EXIT } from '../src/config-check.js';
+import {
+  checkConfiguration,
+  configCheckExitCode,
+  schemaFromDeclaration,
+  selectContract,
+  CONFIG_CHECK_EXIT,
+  CONFIG_CHECK_REFUSALS,
+} from '../src/config-check.js';
 import { createEngine } from '../src/hyperjump-engine.js';
 
 const USAGE =
@@ -70,11 +77,23 @@ export async function main(argv, io = {}) {
 
   let entryLabel = null;
   let declarationPath = null;
+  let correspondencePath = null;
+  let entryId = '';
   const positional = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === '--entry-label') {
       entryLabel = args[index + 1] ?? null;
+      index += 1;
+      continue;
+    }
+    if (arg === '--correspondence') {
+      correspondencePath = args[index + 1] ?? '';
+      index += 1;
+      continue;
+    }
+    if (arg === '--entry-id') {
+      entryId = args[index + 1] ?? '';
       index += 1;
       continue;
     }
@@ -115,7 +134,30 @@ export async function main(argv, io = {}) {
       await writeOnce(stderr, 'config-check: the spec grammar could not be loaded\n');
       return CONFIG_CHECK_EXIT.INTERNAL;
     }
-    const extracted = schemaFromDeclaration(declarationRead.value, { validateDeclaration });
+    let extracted;
+    if (correspondencePath !== null) {
+      if (entryId === '') {
+        await writeOnce(stderr, `${USAGE}\n--correspondence requires --entry-id\n`);
+        return CONFIG_CHECK_EXIT.USAGE;
+      }
+      const correspondenceRead = readJson(correspondencePath, 'correspondence');
+      if (correspondenceRead.error !== undefined) {
+        await writeOnce(stderr, `config-check: ${correspondenceRead.error}\n`);
+        return CONFIG_CHECK_EXIT.USAGE;
+      }
+      extracted = selectContract({
+        correspondence: correspondenceRead.value,
+        entryId,
+        declaration: declarationRead.value,
+        validateDeclaration,
+      });
+      if (extracted.ok) entryLabel = extracted.entryLabel;
+    } else {
+      extracted = schemaFromDeclaration(declarationRead.value, { validateDeclaration });
+    }
+    if (extracted.ok === false && !Object.values(CONFIG_CHECK_REFUSALS).includes(extracted.refusal)) {
+      extracted = { ok: false, refusal: CONFIG_CHECK_REFUSALS.CORRESPONDENCE_INVALID };
+    }
     if (!extracted.ok) {
       const writtenRefusal = await writeOnce(
         stdout,

@@ -51,6 +51,10 @@ export const CONFIG_CHECK_REFUSALS = Object.freeze({
   ENGINE_FAILED: 'CONFIG_ENGINE_FAILED',
   DECLARATION_INVALID: 'CONFIG_DECLARATION_INVALID',
   NO_CONFIG_CONTRACT: 'CONFIG_DECLARATION_HAS_NO_CONTRACT',
+  CORRESPONDENCE_ENTRY_NOT_FOUND: 'CONFIG_CORRESPONDENCE_ENTRY_NOT_FOUND',
+  CORRESPONDENCE_ENTRY_AMBIGUOUS: 'CONFIG_CORRESPONDENCE_ENTRY_AMBIGUOUS',
+  CORRESPONDENCE_PLUGIN_MISMATCH: 'CONFIG_CORRESPONDENCE_PLUGIN_MISMATCH',
+  CORRESPONDENCE_INVALID: 'CONFIG_CORRESPONDENCE_INVALID',
 });
 
 /** Why a schema could not be judged at all (as opposed to judged invalid). */
@@ -376,4 +380,54 @@ export function schemaFromDeclaration(declaration, options = {}) {
     return { ok: false, refusal: CONFIG_CHECK_REFUSALS.DECLARATION_INVALID };
   }
   return { ok: true, schema };
+}
+
+/**
+ * Select the contract that applies to one profile entry, using an explicit
+ * correspondence rather than a guess.
+ *
+ * A correspondence pair asserts "this entry declares this plugin". This function
+ * refuses when the assertion is absent, ambiguous, or contradicts the
+ * declaration's own `plugin.id` — it never falls back to matching on position,
+ * module name, or "the only declaration available", because every one of those
+ * would be an invented identity (the reason configuration comparison was blocked
+ * on the identity decision in the first place).
+ *
+ * The correspondence is taken as an already-parsed document: validating that
+ * artifact's grammar belongs to the module that owns it, not to this one.
+ *
+ * @returns {{ok: true, schema: unknown, entryLabel: string, pluginId: string}
+ *          | {ok: false, refusal: string}}
+ */
+export function selectContract({ correspondence, entryId, declaration, validateDeclaration } = {}) {
+  if (!isPlainObject(correspondence) || !Array.isArray(correspondence.pairs)) {
+    return { ok: false, refusal: CONFIG_CHECK_REFUSALS.CORRESPONDENCE_INVALID };
+  }
+  if (typeof entryId !== 'string' || entryId === '') {
+    return { ok: false, refusal: CONFIG_CHECK_REFUSALS.CORRESPONDENCE_INVALID };
+  }
+  const matched = correspondence.pairs.filter(
+    (pair) => isPlainObject(pair) && pair.entryId === entryId,
+  );
+  if (matched.length === 0) {
+    return { ok: false, refusal: CONFIG_CHECK_REFUSALS.CORRESPONDENCE_ENTRY_NOT_FOUND };
+  }
+  if (matched.length > 1) {
+    // Two assertions for one entry cannot both be true; picking either would be
+    // an invention.
+    return { ok: false, refusal: CONFIG_CHECK_REFUSALS.CORRESPONDENCE_ENTRY_AMBIGUOUS };
+  }
+  const assertedPluginId = matched[0].pluginId;
+  if (typeof assertedPluginId !== 'string' || assertedPluginId === '') {
+    return { ok: false, refusal: CONFIG_CHECK_REFUSALS.CORRESPONDENCE_INVALID };
+  }
+  const declaredPluginId = isPlainObject(declaration) && isPlainObject(declaration.plugin)
+    ? declaration.plugin.id
+    : undefined;
+  if (declaredPluginId !== assertedPluginId) {
+    return { ok: false, refusal: CONFIG_CHECK_REFUSALS.CORRESPONDENCE_PLUGIN_MISMATCH };
+  }
+  const extracted = schemaFromDeclaration(declaration, { validateDeclaration });
+  if (!extracted.ok) return extracted;
+  return { ok: true, schema: extracted.schema, entryLabel: entryId, pluginId: assertedPluginId };
 }
