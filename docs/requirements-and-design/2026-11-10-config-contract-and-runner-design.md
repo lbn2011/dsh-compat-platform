@@ -117,7 +117,24 @@ Two scope boundaries are now explicit rather than implied:
 5. Execute reviewed workloads serially under hard limits; delegate each acceptance record to a subagent, Lead reviews it.
 6. Commit and push each reviewed slice in its owning repository, preserving old records. Do not mark the goal complete until protocol/checker and all twelve migrations are verified.
 
-> **Migration status (2026-11-10):** all twelve pairs are migrated to core `c8123de`. Eleven were executed under the envelope and passed; `profile-dump-install` refused by design because its target already exists, so its migrated success path is unverified. Records: `docs/testing/2026-11-10-runner-migration-simple-suites.md`, `…-complex-suites.md`, `…-install-suites.md` (platform) and `projects/dsh-compat-spec/docs/testing/2026-11-10-config-contract-runner-pilot.md`. The configuration checker is **not** implemented; only the protocol revision and the engine reproduction exist.
+> **Migration status (2026-11-10, updated):** the twelve pre-existing pairs are
+> migrated. Eleven were executed under the envelope and passed;
+> `profile-dump-install` refused by design because its target already exists, so
+> its migrated success path is unverified. A thirteenth pair
+> (`scripts/config-check-batch`, the checker's own batch) was written on the same
+> core and executed green twice. The core then gained `config-check-batch` in
+> `br_prefix_allowed` and in `BR_UNIT_FAMILIES`, `core.manifest` was refreshed,
+> and the vendored spec copy was re-synced and re-pinned to the commit carrying
+> that change; the spec pilot was re-run against those bytes. Earlier rounds
+> against the previous `policy.sh` are labelled superseded in the records rather
+> than dropped.
+>
+> Records: `docs/testing/2026-11-10-runner-migration-{simple,complex,install}-suites.md`,
+> `docs/testing/2026-11-10-config-check.md` (platform) and
+> `projects/dsh-compat-spec/docs/testing/2026-11-10-config-contract-runner-pilot.md`.
+> The configuration checker **is** implemented and measured (59 unit tests, four
+> CLI cases, two green rounds); what it does not do is extract a configuration
+> value from a profile — that remains a separate disclosure decision.
 
 ## Appendix A. Quick reference
 
