@@ -1,0 +1,14 @@
+{
+  "name": "@dsh-compat/config-check",
+  "version": "0.0.0-prepared",
+  "private": true,
+  "type": "module",
+  "description": "Prepared dependency boundary for a future full JSON Schema 2020-12 checker; separate from the zero-dependency spec",
+  "engines": {
+    "node": ">=24.9.0"
+  },
+  "dependencies": {
+    "@hyperjump/browser": "1.6.0",
+    "@hyperjump/json-schema": "1.18.0"
+  }
+}

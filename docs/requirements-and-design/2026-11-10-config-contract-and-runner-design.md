@@ -33,7 +33,7 @@ Implement a separate configuration-checking path bound to explicit caller-assert
 
 ### 4.1 Protocol (D1–D4)
 
-Proposed new revision: `0.2.0-draft.1`; keep explicit legacy validation semantics. The exact new field name and wrapper schema remain pending. Separate declaration-envelope validation from full embedded-schema validation; neither success may be described as the other.
+New revision: `0.2.0-draft.1`, with required root `configSchema` (boolean or object); keep explicit legacy validation semantics. `PROTOCOL_VERSION`, `PluginDeclaration`, `declarationTemplate()` and `declarationJsonSchema()` remain legacy. Add `CONFIG_SCHEMA_PROTOCOL_VERSION`, `SUPPORTED_PROTOCOL_VERSIONS`, `ConfigPluginDeclaration` / `SupportedPluginDeclaration`, and explicit `declarationJsonSchemaForVersion(version)`. Separate declaration-envelope validation from full embedded-schema validation; neither success may be described as the other. Implementation is under review and has not yet been tested.
 
 A new platform command consumes the original supplied profile text, declaration text and digest-bound correspondence. Validate the declarations and reject ambiguous declaration identities. Use bounded parsing and schema compilation/evaluation; never evaluate YAML expressions. A missing configuration is not an empty object. Preserve absent, null and expression-backed configurations as different cases.
 
@@ -44,6 +44,8 @@ Candidate to qualify: `@hyperjump/json-schema@1.18.0` with explicit peer `@hyper
 **User-confirmed format list:** date-time, date, time, duration, email, idn-email, hostname, idn-hostname, ipv4, ipv6, uri, uri-reference, iri, iri-reference, uuid, uri-template, json-pointer, relative-json-pointer, regex. Use the full formats module, not formats-lite. Unknown formats must be rejected during schema-aware admission, including unused definitions: the candidate engine otherwise accepts unknown formats. Do not scan objects inside const/default/examples as schemas.
 
 Candidate offline mechanism: import the 2020-12 dialect and its local metaschemas, remove the browser's http/https/file URI-scheme plugins before handling supplied schemas, then register only admitted local resources. Fresh confined subprocesses prevent shared global registry state between checks. A schema URI is an identifier, not permission to fetch. Qualification must test dynamic scope, embedded URI references, unresolved references, unknown formats, immutable instances and value-safe errors. No dependency has been installed yet.
+
+**Qualification hold, reproduction and user decision (2026-11-10):** tagged Hyperjump `lib/schema.js` recursively interprets identifier keywords in data literals, with `const`/`enum` comparison consequences suggested by source and [upstream PR 125](https://github.com/hyperjump-io/json-schema/pull/125). A bounded reproduction has now been executed: 14 of 22 fixed cases reproduced while the scalar and dynamic-reference controls stayed correct (`docs/testing/2026-11-10-config-engine-reproduction.md`). SchemaSafe 1.3.0 is not a drop-in replacement: tagged sources omit four selected formats and expose URI/anchor/output-pointer limitations. The user selected bounded reproduction first, then a separately reviewed minimal patch proposal if reproduced. Reproduction has not authorised a third-party patch, a semantic restriction or production promotion. Acquisition is not engine qualification: no conformance result exists.
 
 Research references: [tagged dialect implementation](https://github.com/hyperjump-io/json-schema/blob/v1.18.0/draft-2020-12/dynamicRef.js), [tagged format implementation](https://github.com/hyperjump-io/json-schema/blob/v1.18.0/draft-2020-12/format.js), [browser cache and retrieval](https://github.com/hyperjump-io/browser/blob/v1.6.0/lib/browser/browser.js).
 
@@ -84,10 +86,10 @@ Runner records must identify wrapper/core/policy hashes, requested and effective
 
 ## 7. Pending decisions and investigations
 
-1. Engine: Hyperjump 1.18.0/browser 1.6.0 selected for qualification; dependency acquisition, locked transitive versions and executed conformance remain pending.
+1. Engine: Hyperjump 1.18.0/browser 1.6.0 acquired from a reviewed lock (12 packages, all MIT); the identifier-in-literal defect is reproduced (14/22 cases). Executed conformance and any patch remain pending; the installed tree is a disposable artifact directory, not a dependency of this repository.
 2. Format set: the nineteen names in §4.1 are user-confirmed. Unknown required vocabularies must refuse; ordinary unknown annotation keywords must not gain executable semantics. Detailed admission tests remain pending.
 3. Core distribution: selected pinned identical repository-local copies after architecture review (§4.2); manifest ABI and sync/check implementation remain to be specified.
-4. Schema envelope API, revision dispatch and generated-schema entry points: pending design review against legacy tests.
+4. Schema envelope API and revision dispatch: specified in §4.1 and implemented for review; legacy/generated-schema regression verification remains pending.
 
 ## 8. Landing and staged commits
 
