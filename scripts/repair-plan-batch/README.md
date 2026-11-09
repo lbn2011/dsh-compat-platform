@@ -1,74 +1,83 @@
-# `repair-plan-batch` — bounded acceptance run for the repair package
+# repair-plan-batch — source-only bounded-runner migration
 
-Two scripts, one transient unit, one workload, no retry. It answers two questions:
+**Source-only; awaiting Lead bounded verification.** These migrated bytes have not
+been executed, syntax-checked or tested. The historical two-green-round statement
+for 2026-11-09 does not qualify this migration. No commits were made.
+The local [core](</root/dsh-ecosystem-spec/projects/dsh-compat-platform/scripts/bounded-runner/README.md>) is canonical `c8123de`; spec pilot `1615ecf` informed this integration.
 
-1. Are `repair-plan` and `repair-preview` what they claim — a closed schema, a
-   one-element operation vocabulary, a stale refusal, and no writer anywhere?
-2. Does the package's own suite pass on these bytes under the envelope, and does the
-   shipped example preview render as `ready` without changing its fixture?
-
-**No repair is applied by this batch.** There is no apply path in the package to call.
-
-Status: **EXECUTED — two bounded rounds, both green** (2026-11-09). Evidence:
-`docs/testing/2026-11-09-repair-plan.md`.
-
-## Files
-
-| File | Role |
-| --- | --- |
-| `run.sh` | Host-side launcher: envelope, lock, hash manifests, one `systemd-run` unit, terminal readback. |
-| `payload.sh` | In-envelope payload: envelope readback, memory gate, syntax, static contract, example preview, suite, peaks, TAP verdict. |
-
-## Usage
+## Interface and retained workloads
 
 ```bash
-bash projects/dsh-compat-platform/scripts/repair-plan-batch/run.sh
+bash /root/dsh-ecosystem-spec/projects/dsh-compat-platform/scripts/repair-plan-batch/run.sh
 ```
 
-Takes no arguments. Raw artefacts go to
-`${REPAIR_PLAN_RUNS_ROOT:-/data/dsh-ecosystem-test-artifacts/runs}`; only the narrative
-record is committed.
+No arguments. `REPAIR_PLAN_RUNS_ROOT` can override the absolute artifact root
+(default `/data/dsh-ecosystem-test-artifacts/runs`). [run.sh](</root/dsh-ecosystem-spec/projects/dsh-compat-platform/scripts/repair-plan-batch/run.sh>) makes one core call in a
+dedicated subshell with `set +e` and `set -uo pipefail`; no retry.
+[payload.sh](</root/dsh-ecosystem-spec/projects/dsh-compat-platform/scripts/repair-plan-batch/payload.sh>) preserves:
 
-## Envelope
+- Both in-envelope Bash syntax checks, then the original static contract: exact
+  package name/private/module, no dependencies in all four dependency fields,
+  string export targets present, all five expected exports, plan version,
+  one operation kind, disabled-only flag vocabulary, confined-apply limitation,
+  no stale no-apply limitation, no writer-named functions in pure modules, exactly
+  applyApproved/restoreFixture applier writers and 1048576-byte fixture ceiling.
+- The [preview example](</root/dsh-ecosystem-spec/projects/dsh-compat-platform/examples/repair/preview.mjs>) at exit 0, checking the original exact output lines
+  `preview: ready` and `nothing was written; no apply path exists`, plus unchanged
+  checkout fixture digest. The latter line is a retained example assertion, **not
+  a claim that the package has no apply path**.
+- The [four-path example](</root/dsh-ecosystem-spec/projects/dsh-compat-platform/examples/repair/four-paths.mjs>) at exit 0: pass marker, refused/partial/restored statuses,
+  untouched=true and unchanged checkout fixture digest. It exercises approval/apply
+  on a copy in private sandbox scratch; no checkout fixture is applied to.
+- The serial TAP command with the original quoted `tests/*.test.js` argument.
 
-`MemoryMax=384 MiB`, `MemorySwapMax=0`, `TasksMax=32`, `CPUQuota=50%`,
-`RuntimeMaxSec=120`, Node heap 192 MiB, one `MemAvailable >= 819200 KiB` gate checked
-once before any work, `flock -n` on the shared acceptance lock, serial execution.
+The core enforces ownership/cgroup identity, memory384 MiB, swap0, tasks32,
+CPU50%, runtime120s and one MemAvailable>=819200 KiB gate; shared nonblocking lock.
+All Node invocations use an explicit cleaned environment and heap192. Each command
+has an evidence gate and preopened stdout/stderr. All normal valid-argument exits
+(including refusal) reach br_payload_finish. The strict six-field core TAP check
+requires tests=pass>0 and fail=cancelled=skipped=todo=0, rejecting malformed,
+missing and duplicate fields. This intentionally fixes the old repair verdict's
+missing zero checks for cancelled/skipped/todo.
 
-## Launcher exit codes
+## Hash selection and scope
 
-| Code | Meaning |
-| --- | --- |
-| 0 | Green: payload 0, unit settled, hashes identical, no write failures. |
-| 70 | Refusal before or inside the launch (missing tool, active unit, envelope mismatch). |
-| 73 | An evidence write failed. |
-| 74 | The unit did not settle. |
-| 75 | Another acceptance batch holds the shared lock. |
-| 76 | Run directory collision. |
-| 77 | A hash manifest could not be read or written. |
-| 78 | Selected-input drift. |
+Core control hashes include wrapper, payload, manifest and all five modules;
+no additional controls are sourced. Workload selection includes this README,
+package manifest/README, every regular file recursively under repair src/tests
+(including helpers/fixtures), and all repair examples. Original two test names
+and both example scripts remain explicit required guards. This is a comprehensive
+local selection, **not dependency closure**; Node/system tools are not hashed.
+A green run would not prove a repair safe, authorized or applicable to a real host,
+that a digest grants authority, or that DSH honours a field. Two-point fixture
+hash equality cannot rule out an intermediate change reverted before the second hash.
 
-## Payload exit codes
+## Exits
 
-| Code | Meaning |
-| --- | --- |
-| 0 | Green. |
-| 70 | Envelope did not match the approved limits, or the memory gate failed. |
-| 71 | Static contract failed; no test was started. |
-| 72 | Suite verdict not green, or the example preview did not behave. |
-| 73 | An evidence write failed before the workload. |
+0 green; 70 argument/preflight/envelope refusal; 71 syntax/static contract;
+72 preview/four-path/TAP verdict; 73 evidence failure; 74 timeout or unsettled
+unit; 75 held lock; 76 directory collision; 77 hash failure; 78 control/selected
+drift. Evidence failure overrides other verdicts.
 
-## Artefacts in one run directory
+## Artifact changes
 
-`status.txt`, `argv.txt`, `launch.txt`, `unit.log`, `journal.txt`, `terminal-query.txt`,
-`hashes-before.txt`, `hashes-after.txt`, `hashes-diff.txt`, `envelope-*.txt`,
-`memory-gate.txt`, `syntax.txt`, `static-contract.log`, `static-verdict.txt`,
-`example-preview.txt`, `example-preview.err`, `example-verdict.txt`, `node-tap.log`,
-`node-stderr.log`, `node.rc`, `tap-fields.txt`, `tap-summary.txt`, `tap-verdict.txt`,
-`peaks.txt`.
+`control-{before,after,diff}.txt` and `selected-{before,after,diff}.txt` replace
+`hashes-{before,after,diff}.txt`; `selection.txt` now distinguishes counts and records
+workload_dependency_closure=no. Core `terminal-before.txt`, optional
+`terminal-after-stop.txt`, and `terminal.txt` replace terminal-query/stop-confirm
+artifacts. `active-units.txt` combines query rc/output instead of a separate stderr
+file. Ownership evidence, requested envelope, `payload-result.txt` and
+`payload-evidence.txt` are added; status and peaks use core schemas.
+Envelope records are `envelope-systemctl.txt`, `envelope-getunit.txt`,
+`envelope-runtime.txt`, `envelope-effective.txt` and `memory-gate.txt`; peaks are
+no longer appended to the former envelope-cgroup artifact.
 
-## What one green run does not establish
-
-That any repair is safe, approved or applicable; that a plan's digest confers authority;
-that a DSH runtime would honour the field being set; that anything was loaded. The
-package has no apply path, and the batch never writes a document.
+Retained workload names: `syntax.txt`, `static-contract.mjs`, `static-contract.log`,
+`static-verdict.txt`, `example-preview.txt`, `example-preview.err`,
+`example-verdict.txt`, `four-paths.txt`, `four-paths.err`, `four-paths-verdict.txt`,
+`workload.txt`, `node-tap.log`, `node-stderr.log`, `node.rc`, `tap-fields.txt`,
+`tap-summary.txt`, `tap-verdict.txt`. Static stderr and rc are split into
+`static-contract.err` and `static-contract.rc`; syntax streams/first-check rc are
+separate artifacts. TAP fields become ok|invalid, summaries contain the six core
+values (or <invalid>) without old byte/line counts, verdict adds tap_check_rc.
+Host owns `unit.log`; no evidence files were generated by this source migration.

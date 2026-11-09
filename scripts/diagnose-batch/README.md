@@ -1,9 +1,17 @@
 # diagnose acceptance batch
 
-**STATUS: EXECUTED — twice, on 2026-11-08.** The batch ran once with eight failing cases and
-once again after test-side-only corrections; the scripts themselves were not edited between the
-two rounds and are byte-frozen. Both rounds and the per-case breakdown are recorded in
-[`docs/testing/2026-11-08-unified-diagnostics.md`](../../docs/testing/2026-11-08-unified-diagnostics.md).
+**CURRENT STATUS: source-only migration to canonical local bounded-runner `c8123de`,
+awaiting Lead bounded verification.** No execution, syntax check, test, install or commit was
+performed for this migration. The current scripts are not qualified by the historical runs below.
+The [host wrapper](run.sh) and [payload](payload.sh) use only this repository's
+[bounded-runner core](../bounded-runner/README.md), with the spec-test-batch pilot as reference.
+
+## Historical runs — pre-migration bytes only
+
+The former batch ran twice on 2026-11-08: once with eight failing cases and once after
+test-side-only corrections. Its scripts were unchanged between those two historical rounds;
+that byte-freeze does **not** describe this migration. Both rounds and their per-case breakdown
+remain recorded in the [testing record](../../docs/testing/2026-11-08-unified-diagnostics.md).
 
 | round | run directory | TAP | exit |
 | --- | --- | --- | --- |
@@ -13,12 +21,9 @@ two rounds and are byte-frozen. Both rounds and the per-case breakdown are recor
 Both rounds: `selected_inputs=12`, `hashes=identical`, `envelope_mismatch=none`,
 `acc_static_contract=pass`, `acc_yaml_snapshot=identical`, terminal state settled.
 
-**On the `PREPARED` wording still visible in `run.sh` and in this file's earlier revision.** That
-text was written *before* the first execution and describes the state of the bytes at the time of
-writing — not the state of the batch now. It is deliberately left unchanged in the script:
-rewriting a comment after execution would change the bytes of a file that has already been
-executed twice, and the record would then describe scripts that never ran. Treat it as a
-historical note; the table above is the current status.
+Earlier script comments saying `PREPARED` were written before those historical executions.
+The migrated scripts now carry source-only status. Neither the old comments nor the two recorded
+runs are syntax or execution evidence for these new bytes.
 
 This batch exists to answer two questions about the new `dsh-compat-diagnose` command, and
 only those two:
@@ -80,7 +85,7 @@ error string or trailing garbage disqualify it. The value must equal `120000000`
 
 | Stage | What it does | Refusal |
 | --- | --- | --- |
-| 0 | arguments; unit name must end in `.service`; run directory writable | `70` |
+| 0 | exactly two payload arguments; strict core unit name, absolute existing run directory | `70` |
 | 1 | read back cgroup `memory.max`/`memory.swap.max`/`pids.max`/`cpu.max`, `Type`, `RuntimeMaxUSec` | `70` |
 | 2 | compare readback against the approved limits | `70` |
 | 3 | `MemAvailable` gate, once | `70` |
@@ -94,8 +99,19 @@ error string or trailing garbage disqualify it. The value must equal `120000000`
 
 A write failure in any record before the workload stops the batch with `73` and the workload is
 **not** started: an unrecorded envelope is never papered over by a later verdict. The gate is
-checked before the `bash -n` stage, again before the `node` static-contract step, and again at
-stage 5b before the workload. There is no retry: one launch, one workload, one verdict.
+checked before **each** `bash -n` invocation, before static Node, and immediately before the
+test. Syntax/static/test logs are preopened, so failed output opens refuse with `73` rather than
+masquerading as process failures. Every valid-argument payload outcome goes through
+`br_payload_finish`, which records peaks when available and final evidence, with `73` taking
+precedence. Strict six-field `br_tap_check` rejects missing, malformed or duplicate fields
+(including malformed duplicates), requires `tests=pass>0`, and zero fail/cancelled/skipped/todo.
+There is no retry: one launch, one workload, one verdict. Both cleaned Node environments
+explicitly receive core `BR_NODE_OPTIONS=--max-old-space-size=192`.
+
+The host invokes `br_host_run` with absolute paths inside a dedicated subshell using `set +e`
+and `set -uo pipefail`. The core owns locking, the complete active-unit family guard, readback,
+control/selection snapshots, journal and terminal handling. Payload cgroup membership and
+InvocationID must match; a live unit is stopped only with the matching ownership receipt.
 
 ## What the workload runs under
 
@@ -134,15 +150,32 @@ Raw artifacts go to `/data/dsh-ecosystem-test-artifacts/runs/<stamp>-diagnose-ba
 outside the repository. The repository keeps only the narrative record, written **after** a run,
 under `docs/testing/`.
 
-Files the runner writes: `status.txt`, `argv.txt`, `selection.txt`, `hashes-before.txt`,
-`hashes-after.txt`, `hashes-diff.txt`, `active-units.txt`/`.err`, `unit.log`, `journal.txt`,
-`terminal-query.txt`/`-raw.txt`, `systemd-run.rc`, `launch.txt`.
-Files the payload writes: `envelope-cgroup.txt`, `envelope-systemctl.txt`, `envelope-busctl-path.txt`,
-`envelope-busctl.txt`, `envelope-effective.txt`, `envelope-verdict.txt`, `memory-gate.txt`,
-`syntax.txt`, `evidence-gate.txt`, `static-contract.mjs`/`.log`, `static-verdict.txt`,
-`yaml-manifest-before.txt`, `yaml-manifest-after.txt`/`-diff.txt`/`yaml-manifest.txt`,
-`workload.txt`, `node-tap.log`, `node-stderr.log`, `node.rc`, `tap-fields.txt`,
-`tap-summary.txt`, `tap-verdict.txt`, `peaks.txt`.
+### Migrated artifact changes (future runs only)
+
+- The former `hashes-before/after/diff.txt` becomes two independent sets:
+  `control-before/after/diff.txt` and `selected-before/after/diff.txt`. `selection.txt`
+  records `control_files`, `selected_workload_files`, and `workload_dependency_closure=no`;
+  the historical `selected_inputs=12` does not apply to this revision.
+- Host artifacts retained: `status.txt`, `argv.txt`, `selection.txt`, `active-units.txt`,
+  `unit.log`, `journal.txt`, `systemd-run.rc`, `launch.txt`. Added: `requested.txt`,
+  `journal.rc`. Active-unit query rc/stderr now share `active-units.txt`, not a separate `.err`.
+- `terminal-query.txt`/`terminal-query-raw.txt` and `stop-confirm-1.txt` are replaced by
+  `terminal-before.txt`, `terminal.txt`, and conditional `stop.txt`/`terminal-after-stop.txt`.
+  `status.txt` uses the core ABI/phase/launch/terminal/hash/evidence schema.
+- Core payload records are `ownership-systemctl.txt`, `ownership.txt`,
+  `envelope-systemctl.txt`, `envelope-getunit.txt`, `envelope-runtime.txt`,
+  `envelope-effective.txt`, `memory-gate.txt`, `peaks.txt`, `payload-result.txt`, and
+  `payload-evidence.txt`. They replace the old separate cgroup/busctl/path/verdict and
+  `evidence-gate.txt` records; peaks explicitly identify unavailable values.
+- Workload records retain `syntax.txt`, `static-contract.mjs`/`.log`, `static-verdict.txt`,
+  `yaml-manifest-before.txt`, `yaml-manifest-after.txt`, `yaml-manifest-diff.txt`,
+  `yaml-manifest.txt`, `workload.txt`, `node-tap.log`, `node-stderr.log`, `node.rc`,
+  `tap-fields.txt`, `tap-summary.txt`, and `tap-verdict.txt`. Added: `syntax-run.txt`,
+  `syntax-run.log`, `syntax-payload.log`, and `static-contract.rc`.
+  TAP field state is now `ok`/`invalid`; summary records the six canonical fields, not
+  byte/line counts. Verdict includes Node rc, core TAP rc and YAML snapshot state.
+- Refusal paths may stop before later artifacts exist. Finalization records original exit
+  and write-failure count; evidence failures win over otherwise green or nonzero outcomes.
 
 ## Exit codes
 
@@ -152,8 +185,10 @@ not settle · `75` lock held · `76` run-directory collision · `77` hash manife
 unreadable/unwritable · `78` selected-input drift.
 
 A settled terminal state requires `LoadState`/`ActiveState`/`SubState` to agree with
-`inactive:dead` or `failed:failed` **and** `MainPID=0`. A live unit is stopped once and
-re-read; if it still does not settle, the batch exits `74`.
+`inactive:dead` or `failed:failed` **and** `MainPID=0`. A live unit is stopped once only
+when its current InvocationID matches the payload ownership receipt, then re-read;
+unconfirmed ownership never authorizes stopping it. An unsettled unit yields `74`, subject
+to core hash/evidence precedence (evidence failure `73` wins).
 
 ## What a green result would not establish
 
@@ -178,20 +213,23 @@ re-read; if it still does not settle, the batch exits `74`.
   status, real stdio plumbing and the protocol validator are outside this batch.
 - That the full package suite is green. The workload names `tests/diagnose.test.js` explicitly;
   the `tests/*.test.js` `tests/*.test.mjs` glob is never run here.
-- That the other analyzer test files are unaffected. They are outside this batch, and
-  `combined-report.js`, `combined-cli.js`, `profile-dump.js` and `evidence-cli.js` are hashed
-  here only to show they did not change.
+- That other analyzer tests pass or are unaffected. They are selected for snapshots but not
+  executed; equal before/after hashes are only two-point evidence about selected bytes.
 
 ## Selected inputs (hashed before and after)
 
-`run.sh`, `payload.sh`, `packages/analyzer/package.json`, `src/diagnose-internal.js`,
-`src/diagnose.js`, `src/diagnose-cli.js`, `src/diagnose.d.ts`, `src/combined-report.js`,
-`src/combined-cli.js`, `src/profile-dump.js`, `src/evidence-cli.js`,
-`tests/diagnose.test.js` — twelve paths. This is a **named selection, not a dependency
-closure**: `yaml` itself, `combined-report.d.ts`, the analyzer `README.md` and the other
-analyzer test files are not hashed by the runner.
+Control hashing is automatic in core: wrapper, payload, core manifest and all five core modules
+(`common`, `policy`, `host`, `envelope`, `tap`); no additional sourced control files exist.
+The workload selection includes this README, analyzer package manifest and README, and all
+regular-file matches recursively under analyzer `src`, `tests` (including helpers), `fixtures`,
+and repository `examples` (including diagnose examples). Each required tree must be nonempty;
+the diagnose test file is explicitly required. Arrays expand once at preflight with nullglob,
+globstar and dotglob, and each selected path must be absolute and a file. Adding or removing a
+path after selection is not a directory-inventory proof: snapshots cover the frozen selected
+paths only. This is a **named selection, not a dependency closure**; neither the external Node
+binary, system utilities, arbitrary dynamic imports nor all external dependencies are covered.
 
-The runner deliberately leaves `yaml` out, because a named selection is not a closure. The
+YAML remains outside that selection and has its separate payload snapshot. The
 payload does **not** close that gap — it only takes a two-point snapshot: it lists and
 `sha256sum`s the regular files under `packages/analyzer/node_modules/yaml` (sorted)
 immediately before the test and again immediately after, and requires the two snapshots to be

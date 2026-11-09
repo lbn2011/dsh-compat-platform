@@ -1,63 +1,79 @@
-# `dependency-shape-batch` — bounded acceptance for `dsh-compat-dependency-shape`
+# dependency-shape-batch — source-only bounded-runner migration
 
-Two scripts, one transient systemd unit, no retry:
+**Source-only; awaiting Lead bounded verification.** These migrated bytes have not
+been executed, syntax-checked, or tested. Historical evidence does not qualify them.
+The local [core](</root/dsh-ecosystem-spec/projects/dsh-compat-platform/scripts/bounded-runner/README.md>) is the canonical `c8123de` source; the spec pilot `1615ecf` informed this migration.
 
-| File | Runs | Does |
-| --- | --- | --- |
-| `run.sh` | host | takes the lock, writes a hash manifest of the selected inputs, launches one `systemd-run` unit, reads the unit back and reports |
-| `payload.sh` | inside the unit | verifies its own cgroup envelope, the static contract of the command, runs the shipped example, runs the test file, snapshots `yaml` twice, prints the verdict |
-
-Raw artifacts go to `/data/dsh-ecosystem-test-artifacts/runs/<stamp>-dependency-shape-batch-<pid>-<n>/`;
-only the narrative record under `docs/testing/` is committed.
-
-## Usage
+## Interface and workload
 
 ```bash
-bash projects/dsh-compat-platform/scripts/dependency-shape-batch/run.sh
+bash /root/dsh-ecosystem-spec/projects/dsh-compat-platform/scripts/dependency-shape-batch/run.sh
 ```
 
-Takes no arguments. `DEPENDENCY_SHAPE_RUNS_ROOT` may redirect the artifact root.
+No arguments. `DEPENDENCY_SHAPE_RUNS_ROOT` may override the absolute artifact root
+(default `/data/dsh-ecosystem-test-artifacts/runs`). One launch, no retry; shared
+nonblocking acceptance lock. [run.sh](</root/dsh-ecosystem-spec/projects/dsh-compat-platform/scripts/dependency-shape-batch/run.sh>) calls the core in a dedicated subshell with
+`set +e` and `set -uo pipefail`. [payload.sh](</root/dsh-ecosystem-spec/projects/dsh-compat-platform/scripts/dependency-shape-batch/payload.sh>) retains:
 
-## What one run establishes
+- Both in-envelope Bash syntax checks, then the original static contract: exact test
+  script, pinned `yaml@2.9.1`, bin/export targets and test presence. Missing, unreadable,
+  or mismatching installed YAML is still static exit 3 mapped to batch 71; no install.
+- The shipped [profile](</root/dsh-ecosystem-spec/projects/dsh-compat-platform/examples/dependency-shape/profile.yml>) CLI invocation, expected exit 0 and all original counters and shape checks:
+  rows 4, rowsWithInject 3, absent/null/sequence/mapping each 1, other 0,
+  items/names each 2, mappingKeys 1, emptyMappings/nonScalarItems/taggedItems each 0;
+  no diagnostics, six notDerived entries, nine limitations, certification false.
+- Serial TAP invocation of [dependency-shape.test.js](</root/dsh-ecosystem-spec/projects/dsh-compat-platform/packages/analyzer/tests/dependency-shape.test.js>), and YAML regular-file snapshots before the example and after the suite.
+  Symlinked YAML roots/contents are refused. These are two-point comparisons, not
+  installation integrity, provenance, or proof against reverted intermediate changes.
 
-- the static contract of the command: `yaml` pinned to exactly `2.9.1` and the only dependency,
-  `dsh-compat-dependency-shape` as the one `bin`, `./dependency-shape` exporting a `types` sibling,
-  the test file present in the suite's glob;
-- that the shipped example export `examples/dependency-shape/profile.yml` yields the documented
-  counters (`rows 4`, `rowsWithInject 3`, `absent 1`, `null 1`, `sequence 1`, `mapping 1`,
-  `items 2`, `names 2`, `mappingKeys 1`) at exit `0` with no diagnostics;
-- that `tests/dependency-shape.test.js` is green under a 384 MiB / swap 0 / 32 tasks / 50 % CPU /
-  120 s envelope with a 192 MiB heap, and that the `yaml` regular-file manifest is byte-identical
-  before and after.
+The core verifies ownership/cgroup identity, 384 MiB memory, swap 0, 32 tasks,
+50% CPU, 120 seconds and one MemAvailable >= 819200 KiB gate. All Node processes,
+including the example checker, explicitly use a cleaned environment and heap 192.
+Each workload has an evidence gate and preopened output destinations. The core
+finalizer handles every normal valid-argument exit, including refusals.
 
-## What one run does not establish
+TAP uses the core's strict six singleton fields: tests=pass>0 and
+fail=cancelled=skipped=todo=0; missing, duplicate or malformed fields fail.
 
-Anything about a real DSH host or a real profile: no export is produced here, no plugin is loaded,
-no dependency is resolved, and the suite asserts on this package's own summary. `certification`
-stays `false`. The `yaml` two-point snapshot is a comparison of two instants, not a provenance or
-install-integrity check. The example is synthetic and is not a valid loader configuration.
+## Hash selection and limits
 
-## Exit codes
+The core hashes both scripts, its manifest and all five core modules before/after.
+There are no additional sourced controls. Selected workload inputs include this
+README, package manifest/README, every regular file under analyzer src/tests
+(including helpers and nested fixtures), analyzer fixtures and the dependency-shape
+example tree. This broad selection is **not dependency closure**. Installed YAML is
+covered only by the separate payload snapshots; Node/system tools are not hashed.
+No real host/plugin loading, runtime dependency resolution or certification is claimed.
 
-Launcher: `0` green, `70` refusal before or inside the launch, `71` static contract or dependency
-precondition failed (no workload started), `72` verdict not green, `73` an evidence write failed,
-`74` the unit did not settle, `75` lock held, `76` run-directory collision, `77` a hash manifest
-could not be read or written, `78` selected-input drift.
+## Exits
 
-Payload: `0` green, `70` envelope refusal, `71` static contract or dependency precondition
-failed, `72` verdict not green, `73` an evidence write failed.
+0 green; 70 argument/preflight/envelope refusal; 71 syntax/static/dependency
+precondition; 72 example/TAP/YAML verdict; 73 evidence failure; 74 timeout or
+unsettled unit; 75 held lock; 76 directory collision; 77 hash failure;
+78 control or selected-input drift. Evidence failure overrides workload verdicts.
 
-## Files a run leaves behind
+## Artifact migration
 
-`status.txt`, `envelope-verdict.txt`, `memory-gate.txt`, `memory-gate-raw.txt`,
+Core artifacts replace the former combined hash and terminal schemas:
+`control-before.txt`, `control-after.txt`, `control-diff.txt` and
+`selected-before.txt`, `selected-after.txt`, `selected-diff.txt` replace
+`hashes-before.txt`, `hashes-after.txt`, `hashes-diff.txt`.
+`selection.txt` now distinguishes control/selected counts and records
+`workload_dependency_closure=no`. `terminal-before.txt`, optional
+`terminal-after-stop.txt`, and `terminal.txt` replace terminal-query/stop-confirm
+files. `active-units.txt` contains query rc plus merged output; no separate
+`active-units.err`. Core ownership, requested envelope, launch, journal/status,
+`payload-result.txt`, `payload-evidence.txt` and measured/unavailable peaks are added.
+Envelope evidence is now `envelope-systemctl.txt`, `envelope-getunit.txt`,
+`envelope-runtime.txt`, `envelope-effective.txt`, and `memory-gate.txt`.
+
+Workload names retained: `syntax.txt`, `static-contract.mjs`, `static-contract.log`,
 `static-verdict.txt`, `example.stdout.json`, `example.stderr.txt`, `example.rc`,
-`example-verdict.txt`, `example-check.err.txt`, `node-tap.log`, `node-stderr.log`, `node.rc`,
-`tap-summary.txt`, `tap-verdict.txt`, `yaml-manifest-before.txt`, `yaml-manifest-after.txt`,
-`selected_inputs`, `selection.txt`, `hashes-before.txt`, `hashes-after.txt`, `peaks.txt`,
-`active-units.err`.
-
-## Deviations seen so far
-
-- The scripts were created mode `600` by the editor and needed `chmod 755` before the first
-  launch; that refusal starts no unit and is not a round. File modes are not part of the hash
-  manifest.
+`example-verdict.txt`, `example-check.err.txt`, `workload.txt`, `node-tap.log`,
+`node-stderr.log`, `node.rc`, `tap-fields.txt`, `tap-summary.txt`, `tap-verdict.txt`,
+and the YAML manifest files. Static stderr and rc now have separate
+`static-contract.err`/`static-contract.rc`; syntax streams, example-check stdout/rc,
+and YAML snapshot/diff stderr are separate artifacts. TAP summaries now contain
+six core values (`<invalid>` on parse failure), fields are `ok|invalid`, and the
+verdict includes `tap_check_rc`; old byte/line counts are not emitted.
+Only the host writes `unit.log`. No artifacts were generated by this migration.
