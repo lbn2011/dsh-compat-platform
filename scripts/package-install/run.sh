@@ -1,297 +1,105 @@
 #!/bin/bash
 # Host-side launcher for the packaging acceptance batch (S5).
 #
-# STATUS: PREPARED. Written for review before execution; nothing has been run on
-# these bytes at the time of writing.
+# SOURCE-ONLY migration to the canonical bounded runner (ABI bounded-runner/1,
+# core commit c8123de). Awaiting Lead bounded verification. These bytes have not
+# been executed, syntax-qualified, sourced or launched; no unit, no workload.
 #
 # Scope: ONE transient unit, one workload, no retry. One question:
 #   Do the four platform packages still work when they are packed into tarballs and
 #   installed into a directory that has no sibling checkout on disk?
+#
+# The envelope, the shared lock, the two-point hash discipline, the terminal-state
+# readback and the exit-code vocabulary now live in scripts/bounded-runner and are
+# NOT restated here. What this wrapper owns is the workload name and the selected
+# inputs.
 #
 # The consumer imports every documented subpath by package specifier, and each resolved
 # module path is checked to live under the consumer's own node_modules. Nothing here
 # publishes anything: `npm pack` writes a tarball, `npm install` puts it in a throwaway
 # directory, and both stay inside the run.
 #
-# Usage:  bash projects/dsh-compat-platform/scripts/package-install/run.sh
-#         Takes no arguments.
+# PRECONDITION, NOT PERFORMED HERE: `npm pack`/`npm install` run with `--offline` and
+# an explicit `--cache` under a writable HOME inside the run directory, so a missing
+# tarball fails instead of being downloaded. npm and node are taken from the pinned
+# absolute paths below, never from the caller's PATH.
 #
-# Exit codes: 0 green; 70 refusal before or inside the launch; 71 static contract
-# failed (nothing was packed); 72 the consumer probe failed; 73 an evidence write
-# failed; 74 the unit did not settle; 75 lock held; 76 run-directory collision;
-# 77 a hash manifest could not be read or written; 78 selected-input drift.
+# Usage:  bash /root/dsh-ecosystem-spec/projects/dsh-compat-platform/scripts/package-install/run.sh
+#         Takes no arguments. Invoke it by ABSOLUTE path: the core binds every
+#         active source frame to the absolute control list, so a relative entry
+#         path is refused (77) before any unit is created.
+#
+# Exit codes (host, from the core): 0 green; 70 refusal before or inside the
+# launch; 71 static contract failed (nothing was packed); 72 a pack/install/probe
+# step failed; 73 an evidence write failed; 74 the unit did not settle; 75 lock
+# held; 76 run-directory collision; 77 a hash manifest/source frame could not be
+# read, matched or written; 78 selected-input drift.
+#
+# Payload: 0 green, 70 envelope/argument refusal, 71 static contract failed,
+# 72 a step failed, 73 evidence write failed.
 
+set +e
 set -uo pipefail
-
-ROOT=/root/dsh-ecosystem-spec
-REPO=$ROOT/projects/dsh-compat-platform
-SLICE=$REPO/scripts/package-install
-# Raw artifacts live OUTSIDE the repository; only the narrative record is committed.
-RUNS=${PACKAGE_INSTALL_RUNS_ROOT:-/data/dsh-ecosystem-test-artifacts/runs}
-LOCKFILE=/root/dsh-ecosystem-spec/experiments/acceptance/runs/.acceptance.lock
-RUNNER=$SLICE/run.sh
-PAYLOAD=$SLICE/payload.sh
-NODE=/www/server/nodejs/v24.21.0/bin/node
-UNIT_PREFIX=package-install
-
-EXPECT_MEM=384M
-EXPECT_SWAP=0
-EXPECT_TASKS=32
-EXPECT_RUNTIME=120
-EXPECT_CPU=50%
-
-# SELECTED INPUTS. The runner, the payload, the three package manifests, the four
-# READMEs, every module the consumer imports, the probe and its expectations, plus the
-# tarball source for the one dependency. This is a named selection, not a closure.
-HASHED=(
-  "$RUNNER"
-  "$PAYLOAD"
-  "$SLICE/consumer-check.mjs"
-  "$SLICE/expect.json"
-  "$REPO/packages/analyzer/package.json"
-  "$REPO/packages/analyzer/README.md"
-  "$REPO/packages/host/package.json"
-  "$REPO/packages/host/README.md"
-  "$REPO/packages/runtime/package.json"
-  "$REPO/packages/runtime/README.md"
-  "$REPO/packages/repair/package.json"
-  "$REPO/packages/repair/README.md"
-  "$REPO/packages/analyzer/src/profile-dump.js"
-  "$REPO/packages/analyzer/src/dependency-shape.js"
-  "$REPO/packages/analyzer/src/diagnose.js"
-  "$REPO/packages/host/src/index.js"
-  "$REPO/packages/host/src/envelope.js"
-  "$REPO/packages/host/src/page.js"
-  "$REPO/packages/runtime/src/isolation-policy.js"
-  "$REPO/packages/repair/src/repair-apply.js"
-  "$REPO/packages/analyzer/node_modules/yaml/package.json"
-)
-
-write_fail=0
-addwf() { write_fail=$((write_fail + 1)); printf 'run.sh: evidence write failed: %s\n' "$1" >&2; }
-die() { printf 'run.sh: %s\n' "$2" >&2; exit "$1"; }
-wr() { cat > "$1" || return 1; [ -s "$1" ] || return 1; }
-is_num() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; return 0; }
-show_field() {
-  printf '%s\n' "$1" | awk -F= -v k="$2" '
-    BEGIN { n = 0; v = "" }
-    $1 == k { n++; v = substr($0, length(k) + 2) }
-    END { if (n == 1) { print v } else { print "<ambiguous-or-missing:" n ">" } }
-  '
-}
-# A terminal state counts as settled only when all four facts agree.
-settled_read() {
-  local rc=$1 load=$2 active=$3 sub=$4 pid=$5
-  [ "$rc" -eq 0 ] || return 1
-  case "$load" in not-found|loaded|merged) ;; *) return 1 ;; esac
-  case "$active:$sub" in inactive:dead|failed:failed) ;; *) return 1 ;; esac
-  [ "$pid" = 0 ] || return 1
-  return 0
-}
-hashset() {
-  local f line digest
-  for f in "${HASHED[@]}"; do
-    line=$(sha256sum "$f" 2>/dev/null) || return 1
-    digest=${line%% *}
-    case "$digest" in *[!0-9a-f]*) return 1 ;; esac
-    [ "${#digest}" -eq 64 ] || return 1
-    printf '%s\n' "$line" || return 1
+(
+  # Dedicated host subshell owns the core lock descriptor; never enable errexit.
+  set +e
+  set -uo pipefail
+  ROOT=/root/dsh-ecosystem-spec
+  REPO=$ROOT/projects/dsh-compat-platform
+  SLICE=$REPO/scripts/package-install
+  CORE=$REPO/scripts/bounded-runner
+  NODE=/www/server/nodejs/v24.21.0/bin/node
+  NPM=/www/server/nodejs/v24.21.0/bin/npm
+  # Raw artifacts live OUTSIDE the repository; only the narrative record is committed.
+  RUNS=${PACKAGE_INSTALL_RUNS_ROOT:-/data/dsh-ecosystem-test-artifacts/runs}
+  [ "$#" -eq 0 ] || exit 70
+  source "$CORE/common.sh" || exit 70
+  source "$CORE/policy.sh" || exit 70
+  source "$CORE/host.sh" || exit 70
+  command -v bwrap >/dev/null 2>&1 || exit 70
+  [ -x "$NODE" ] || exit 70
+  [ -x "$NPM" ] || exit 70
+  for d in analyzer host runtime repair; do
+    [ -d "$REPO/packages/$d" ] || exit 70
   done
-}
-
-[ "$#" -eq 0 ] || die 70 "this runner takes no arguments (got $#)"
-
-# ---------------------------------------------------------------- 0. preflight
-command -v systemd-run >/dev/null 2>&1 || die 70 "systemd-run missing"
-command -v flock >/dev/null 2>&1 || die 70 "flock missing"
-command -v bwrap >/dev/null 2>&1 || die 70 "bwrap missing"
-command -v journalctl >/dev/null 2>&1 || die 70 "journalctl missing"
-[ -x "$NODE" ] || die 70 "node binary missing: $NODE"
-for f in "$RUNNER" "$PAYLOAD"; do [ -f "$f" ] || die 70 "batch file missing: $f"; done
-missing=''
-for f in "${HASHED[@]}"; do [ -f "$f" ] || missing="$missing $f"; done
-[ -z "$missing" ] || die 70 "selected input missing:${missing}"
-
-mkdir -p "$RUNS" || die 73 "cannot create $RUNS"
-
-# One acceptance batch at a time, through the SAME lock every other batch uses.
-[ -e "$LOCKFILE" ] || die 70 "shared lock file missing: $LOCKFILE"
-exec 9>"$LOCKFILE" || die 73 "cannot open lock file $LOCKFILE"
-# A held lock is a refusal, never a wait: this batch does not queue behind others.
-flock -n 9 || die 75 "another acceptance batch holds the shared lock $LOCKFILE"
-
-STAMP=$(date -u +%Y%m%dT%H%M%SZ) || die 73 "cannot read the clock"
-# The unit name carries the .service suffix: the payload checks it and derives the
-# busctl object path from it, and a suffixless name addresses the wrong object.
-UNIT="$UNIT_PREFIX-$STAMP-$$-$RANDOM.service"
-RUN="$RUNS/$STAMP-$UNIT_PREFIX-$$-$RANDOM"
-[ -e "$RUN" ] && die 76 "run directory already exists: $RUN"
-mkdir "$RUN" || die 73 "cannot create run directory: $RUN"
-chmod 700 "$RUN" 2>/dev/null || addwf chmod-run
-
-refuse() { # code reason
-  if ! printf 'acceptance_exit=%s\nrefusal=%s\nworkload_started=no\nunit=%s\nrun_dir=%s\n' \
-      "$1" "$2" "$UNIT" "$RUN" | wr "$RUN/status.txt"; then
-    addwf status.txt
-    printf 'run.sh: refusal could not be recorded (%s); exiting 73\n' "$2" >&2
-    exit 73
-  fi
-  printf 'run_dir=%s\nacceptance_exit=%s\nrefusal=%s\n' "$RUN" "$1" "$2"
-  exit "$1"
-}
-
-if ! hashset | wr "$RUN/hashes-before.txt"; then
-  addwf hashes-before.txt
-  refuse 73 snapshot_write_failed
-fi
-BEFORE_LINES=$(awk 'END { print NR }' "$RUN/hashes-before.txt")
-if [ "$BEFORE_LINES" -ne "${#HASHED[@]}" ]; then
-  addwf hashes-before-incomplete
-  refuse 73 snapshot_incomplete
-fi
-printf 'selected_inputs=%s\n' "${#HASHED[@]}" > "$RUN/selection.txt" || addwf selection.txt
-
-# The unit family query is evidence: a failed query is not "nothing is running".
-UNITS_RAW=$(systemctl list-units --state=active,activating,deactivating --no-legend --plain \
-  'package-install-*' \
-  'spec-test-batch-*' \
-  'profile-dump-batch-*' 'profile-dump-install-*' 'diagnose-batch-*' 'diagnose-real-wiring-*' \
-  'diagnostics-gui-*' 'dependency-shape-*' 'trusted-extraction-batch-*' \
-  'driver-config-contract-batch-*' \
-'p0-*' 'acc-*' 'admission-*' 2>"$RUN/active-units.err")
-units_rc=$?
-if [ "$units_rc" -ne 0 ]; then
-  [ -s "$RUN/active-units.err" ] || addwf active-units.err
-  refuse 70 "active_unit_query_failed(rc=$units_rc)"
-fi
-if [ -n "$UNITS_RAW" ]; then
-  printf '%s\n' "$UNITS_RAW" | wr "$RUN/active-units.txt" || addwf active-units.txt
-  refuse 70 active_units_present
-fi
-: > "$RUN/active-units.txt" || addwf active-units.txt
-
-# ---------------------------------------------------------------- 1. one launch
-ARGV=(systemd-run --wait --pipe --collect --unit="$UNIT"
-  --property=Type=exec
-  --property=MemoryMax="$EXPECT_MEM" --property=MemorySwapMax="$EXPECT_SWAP"
-  --property=TasksMax="$EXPECT_TASKS" --property=RuntimeMaxSec="$EXPECT_RUNTIME"
-  --property=CPUQuota="$EXPECT_CPU"
-  --working-directory="$SLICE"
-  -- /bin/bash "$PAYLOAD" "$UNIT" "$RUN")
-
-if ! printf '%q ' "${ARGV[@]}" | wr "$RUN/argv.txt"; then
-  addwf argv.txt
-  refuse 73 argv_write_failed
-fi
-
-: > "$RUN/unit.log" || { addwf unit.log; refuse 73 unit_log_unwritable; }
-if ! printf 'probe\n' >> "$RUN/unit.log"; then addwf unit.log-probe; refuse 73 unit_log_unwritable; fi
-: > "$RUN/unit.log" || { addwf unit.log; refuse 73 unit_log_unwritable; }
-
-printf 'unit=%s\nrun_dir=%s\nlaunch=started\n' "$UNIT" "$RUN" > "$RUN/launch.txt" \
-  || { addwf launch.txt; refuse 73 launch_write_failed; }
-
-# Every artefact a launch would rely on must exist before the launch happens.
-if [ "$write_fail" -ne 0 ]; then
-  refuse 73 prelaunch_evidence_write_failed
-fi
-
-timeout 200 "${ARGV[@]}" > "$RUN/unit.log" 2>&1
-launch_rc=$?
-printf '%s\n' "$launch_rc" > "$RUN/systemd-run.rc" || addwf systemd-run.rc
-
-timeout 30 journalctl -u "$UNIT" --no-pager -o cat > "$RUN/journal.txt" 2>&1
-journal_rc=$?
-printf 'journal_rc=%s\n' "$journal_rc" >> "$RUN/journal.txt" || addwf journal-rc-line
-if [ "$journal_rc" -ne 0 ]; then addwf "journalctl_rc:$journal_rc"; fi
-[ -s "$RUN/journal.txt" ] || addwf journal-empty
-
-# ---------------------------------------------------------------- 2. terminal state
-tq_raw=$(timeout 30 systemctl show "$UNIT" -p LoadState -p ActiveState -p SubState -p MainPID 2>&1)
-tq_rc=$?
-printf '%s\n' "$tq_raw" > "$RUN/terminal-query-raw.txt" || addwf terminal-query-raw.txt
-load=$(show_field "$tq_raw" LoadState)
-active=$(show_field "$tq_raw" ActiveState)
-sub=$(show_field "$tq_raw" SubState)
-pid=$(show_field "$tq_raw" MainPID)
-
-stop_attempted=no; stop_rc=not-attempted
-confirm=unconfirmed; terminal_ok=no
-if settled_read "$tq_rc" "$load" "$active" "$sub" "$pid"; then
-  terminal_ok=yes; confirm=settled
-else
-  if [ "$tq_rc" -eq 0 ] && is_num "$pid" && [ "$pid" -gt 0 ]; then
-    case "$load:$active" in
-      loaded:active|loaded:activating|loaded:reloading|loaded:deactivating|merged:active)
-        stop_attempted=yes
-        timeout 20 systemctl stop "$UNIT" 2>/dev/null; stop_rc=$?
-        c1=$(timeout 30 systemctl show "$UNIT" -p LoadState -p ActiveState -p SubState -p MainPID 2>&1); c1_rc=$?
-        printf '%s\n' "$c1" > "$RUN/stop-confirm-1.txt" || addwf stop-confirm-1.txt
-        if settled_read "$c1_rc" "$(show_field "$c1" LoadState)" "$(show_field "$c1" ActiveState)" "$(show_field "$c1" SubState)" "$(show_field "$c1" MainPID)"; then
-          terminal_ok=yes; confirm=stopped-and-settled
-          tq_rc=$c1_rc
-          load=$(show_field "$c1" LoadState); active=$(show_field "$c1" ActiveState)
-          sub=$(show_field "$c1" SubState); pid=$(show_field "$c1" MainPID)
-        else
-          confirm=stop-did-not-settle
-        fi
-        ;;
-      *) confirm=not-confirmed-live ;;
-    esac
-  else
-    confirm=query-failed-or-unreadable
-  fi
-fi
-
-printf 'terminal_query_rc=%s\nload_state=%s\nactive_state=%s\nsub_state=%s\nmain_pid=%s\nterminal_ok=%s\nconfirmation=%s\nstop_attempted=%s\nstop_rc=%s\nlaunch_rc=%s\n' \
-  "$tq_rc" "$load" "$active" "$sub" "$pid" "$terminal_ok" "$confirm" "$stop_attempted" "$stop_rc" "$launch_rc" \
-  > "$RUN/terminal-query.txt" || addwf terminal-query.txt
-
-# ---------------------------------------------------------------- 3. post-run hashes
-hash_rc=0
-if ! hashset | wr "$RUN/hashes-after.txt"; then
-  addwf hashes-after.txt
-  hash_rc=77
-else
-  diff -q "$RUN/hashes-before.txt" "$RUN/hashes-after.txt" > "$RUN/hashes-diff.txt" 2>&1
-  diff_rc=$?
-  if [ "$diff_rc" -eq 1 ]; then hash_rc=78; elif [ "$diff_rc" -ne 0 ]; then hash_rc=77; fi
-fi
-
-# ---------------------------------------------------------------- 4. verdict
-payload_rc=$launch_rc
-exit_rc=0
-case "$payload_rc" in
-  0) exit_rc=0 ;;
-  70|71|72|73) exit_rc=$payload_rc ;;
-  124) exit_rc=74 ;;
-  *) exit_rc=70 ;;
-esac
-[ "$terminal_ok" = yes ] || exit_rc=74
-[ "$hash_rc" -ne 0 ] && exit_rc=$hash_rc
-# An unrecorded run is not a green one: a write failure outranks every verdict.
-[ "$write_fail" -ne 0 ] && exit_rc=73
-
-launch_state=completed
-[ "$launch_rc" -eq 124 ] && launch_state=timed_out
-
-if ! printf '%s\n' \
-  "unit=$UNIT" \
-  "run_dir=$RUN" \
-  "launch=$launch_state" \
-  "systemd_run_rc=$launch_rc" \
-  "payload_rc=$payload_rc" \
-  "terminal_ok=$terminal_ok" \
-  "terminal_confirmation=$confirm" \
-  "hashes=$([ "$hash_rc" -eq 0 ] && echo identical || echo not-identical)" \
-  "hash_rc=$hash_rc" \
-  "selected_inputs=${#HASHED[@]}" \
-  "write_failures=$write_fail" \
-  "acceptance_exit=$exit_rc" | wr "$RUN/status.txt"; then
-  addwf status.txt
-  printf 'run_dir=%s\nacceptance_exit=73\nrefusal=final_status_write_failed\n' "$RUN"
-  exit 73
-fi
-printf 'run_dir=%s\nacceptance_exit=%s\nwrite_failures=%s\n' "$RUN" "$exit_rc" "$write_fail"
-if [ "$write_fail" -ne 0 ]; then exit 73; fi
-exit "$exit_rc"
+  # No additional sourced control file: this payload imports core modules only.
+  BR_EXTRA_CONTROL=()
+  # The payload's only non-green exits are refusals (70), a failed static contract
+  # (71), a failed pack/install/probe step (72) and an evidence failure (73). All
+  # four are declared so the launcher relays them instead of collapsing them to 70.
+  BR_WORKLOAD_EXITS=(0 70 71 72 73)
+  # SELECTED INPUTS: the probe, its expectations, the four manifests, the four
+  # READMEs, every module the consumer imports, and the tarball source for the one
+  # dependency. run.sh and payload.sh are NOT repeated here — the core hashes them
+  # as control sources, together with the manifest and all five modules. This is a
+  # named selection, not a dependency closure.
+  BR_SELECTED_INPUTS=(
+    "$SLICE/consumer-check.mjs"
+    "$SLICE/expect.json"
+    "$REPO/packages/analyzer/package.json"
+    "$REPO/packages/analyzer/README.md"
+    "$REPO/packages/host/package.json"
+    "$REPO/packages/host/README.md"
+    "$REPO/packages/runtime/package.json"
+    "$REPO/packages/runtime/README.md"
+    "$REPO/packages/repair/package.json"
+    "$REPO/packages/repair/README.md"
+    "$REPO/packages/analyzer/src/profile-dump.js"
+    "$REPO/packages/analyzer/src/dependency-shape.js"
+    "$REPO/packages/analyzer/src/diagnose.js"
+    "$REPO/packages/host/src/index.js"
+    "$REPO/packages/host/src/envelope.js"
+    "$REPO/packages/host/src/page.js"
+    "$REPO/packages/runtime/src/isolation-policy.js"
+    "$REPO/packages/repair/src/repair-apply.js"
+    "$REPO/packages/analyzer/node_modules/yaml/package.json"
+  )
+  for f in "${BR_SELECTED_INPUTS[@]}"; do
+    br_path "$f" && [ -f "$f" ] || exit 70
+  done
+  br_host_run "$CORE" "$SLICE/run.sh" "$SLICE/payload.sh" "$RUNS" package-install
+  rc=$?
+  printf 'run_dir=%s\nacceptance_exit=%s\n' "${BR_RUN:-not-created}" "$rc"
+  exit "$rc"
+)
+exit "$?"

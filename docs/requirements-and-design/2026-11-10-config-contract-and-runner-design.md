@@ -100,6 +100,8 @@ Runner records must identify wrapper/core/policy hashes, requested and effective
 5. Execute reviewed workloads serially under hard limits; delegate each acceptance record to a subagent, Lead reviews it.
 6. Commit and push each reviewed slice in its owning repository, preserving old records. Do not mark the goal complete until protocol/checker and all twelve migrations are verified.
 
+> **Migration status (2026-11-10):** all twelve pairs are migrated to core `c8123de`. Eleven were executed under the envelope and passed; `profile-dump-install` refused by design because its target already exists, so its migrated success path is unverified. Records: `docs/testing/2026-11-10-runner-migration-simple-suites.md`, `…-complex-suites.md`, `…-install-suites.md` (platform) and `projects/dsh-compat-spec/docs/testing/2026-11-10-config-contract-runner-pilot.md`. The configuration checker is **not** implemented; only the protocol revision and the engine reproduction exist.
+
 ## Appendix A. Quick reference
 
 | Concern | Location |

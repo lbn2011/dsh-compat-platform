@@ -1,6 +1,12 @@
 # profile-dump-retained-export
 
-**STATUS: EXECUTED TWICE, PASS EACH TIME (2026-11-08 and 2026-11-09).**
+**STATUS: SOURCE-ONLY migration to the canonical bounded runner. Awaiting Lead bounded
+verification.** The three files here were rewritten against `scripts/bounded-runner`
+(ABI `bounded-runner/1`, core commit `c8123de`) and have **not** been executed,
+syntax-qualified, sourced or launched in this form; no unit has been created from them.
+
+**Pre-migration history — EXECUTED TWICE, PASS EACH TIME (2026-11-08 and 2026-11-09).**
+That record describes the *previous* launcher, not these bytes.
 
 - **2026-11-08 — the `0.1-draft.1` shape.** One bounded run returned `verdict=pass` for all three
   samples (`samples_verified=3`, `child_runs=3`, `first_failure=none`) on verifier bytes
@@ -32,21 +38,20 @@ a sandboxed child process and judges that child's JSON against a table fixed in 
 
 ---
 
-## 1. Files
+## 0. Invocation
 
-| file | role |
-| --- | --- |
-| `run.sh` | host-side launcher: preflight, shared lock, active-unit query, one `systemd-run` launch, terminal `MainPID=0` check, before/after input hashes, verdict mapping |
-| `payload.sh` | in-unit: envelope readback, one `MemAvailable` gate, evidence gates, dependency precondition, before/after snapshots, runs the verifier |
-| `retained-export.mjs` | the verifier: pins the three inputs, runs the CLI once per sample inside `bwrap`, judges the JSON |
-| `README.md` | this file |
+```bash
+bash /root/dsh-ecosystem-spec/projects/dsh-compat-platform/scripts/profile-dump-retained-export/run.sh
+```
 
-Nothing else in the repository is modified. The existing parser, the CLI, and the older
-runners (`profile-dump-batch`, `profile-dump-install`) are untouched.
+No arguments; extra arguments are refused `70`. **The path must be absolute.** The core binds
+every active shell source frame to its absolute control list, so a relative entry path
+(`scripts/…/run.sh`, `./run.sh`) is refused `77` **before** the lock is taken, before a run
+directory is created, and before any unit or workload is launched.
 
-## 2. The three retained samples
+### Artifact root — pinned, not passed
 
-Read from an **external** artifact root, outside the repository:
+The three retained captures are read from an **external** artifact root outside the repository:
 
 ```
 /data/dsh-ecosystem-test-artifacts/experiments/acceptance/runs/
@@ -55,6 +60,30 @@ Read from an **external** artifact root, outside the repository:
     2-denied/out/run-root/out/stdout.bin
     3-script-probe/out/run-root/out/stdout.bin
 ```
+
+Before this migration the root travelled to the payload as a **third** argument, and a transient
+systemd service runs in a clean, detached environment, so the canonical two-argument launch
+(`unit`, `run`) cannot carry it. The root is therefore **pinned as a constant**, identically in
+`run.sh` and `payload.sh`, to the directory the recorded runs used. If the caller sets
+`RETAINED_EXPORT_ARTIFACT_ROOT` to any other value, `run.sh` refuses `70` with an explicit message
+rather than launch a batch whose payload would read a different tree. Silently ignoring the
+override was the alternative and is worse: the caller would believe the batch judged a different
+set of captures. **Consequence: redirecting the artifact root is not supported by the migrated
+batch.** See §11 item 5 and "Changes in this migration".
+
+## 1. Files
+
+| file | role |
+| --- | --- |
+| `run.sh` | launcher: refuses an artifact-root override, names the selected inputs, delegates the lock, unit, snapshots and verdict to the core |
+| `payload.sh` | in-unit: envelope receipt, syntax and dependency preconditions, before/after snapshots, runs the verifier once, maps the verdict |
+| `retained-export.mjs` | the verifier: pins the three inputs, runs the CLI once per sample inside `bwrap`, judges the JSON |
+| `README.md` | this file |
+
+Nothing else in the repository is modified. The existing parser, the CLI, and the older
+runners (`profile-dump-batch`, `profile-dump-install`) are untouched.
+
+## 2. The three retained samples
 
 | sample | bytes | sha256 | historical stderr |
 | --- | --- | --- | --- |
@@ -67,11 +96,9 @@ is a **failure** (exit 60 / 61), never a skip: "the sample is not there" must no
 "the run passed". Those are the verifier's codes — `run.sh` usually notices an absent
 capture first, as `70` from its selected-input check.
 
-The artifact root may be redirected with `--artifact-root` / `RETAINED_EXPORT_ARTIFACT_ROOT`,
-but the three files under it must still match the pins above byte for byte. The pin, not the
-path, is what identifies a sample: a symlink at the pinned location is followed and its
-bytes are what get hashed, so the path checks are hygiene rather than proof. The public log
-records a fixed `source=retained_export_captures_v1` line and never the caller's path; the
+The pin, not the path, is what identifies a sample: a symlink at the pinned location is followed
+and its bytes are what get hashed, so the path checks are hygiene rather than proof. The public
+log records a fixed `source=retained_export_captures_v1` line and never the caller's path; the
 path appears only in `retained-export-inputs.txt` under the private run directory.
 
 A byte-identical copy of this run also exists inside the repository at
@@ -112,7 +139,8 @@ outcome.
 
 The verifier is *not* wrapped in a second `bwrap`: it spawns one sandbox per CLI child
 itself, and nesting user namespaces would only add a failure mode without adding a
-boundary.
+boundary. The migrated payload keeps that deliberately: the workload line is a plain
+`env -i … "$NODE" "$VERIFIER"`, not a `bwrap` invocation.
 
 ## 4. The expectation matrix
 
@@ -220,7 +248,8 @@ tag belongs to, so no entry attribution is claimed.
 
 ## 6. Envelope
 
-Identical to the reviewed batches, with the unit prefix changed:
+Identical to the reviewed batches, with the unit prefix changed. The values and the strict readback
+now live in the core (`scripts/bounded-runner/envelope.sh`); this batch names none of them itself.
 
 | property | value |
 | --- | --- |
@@ -246,6 +275,8 @@ retried.
 
 ## 7. Execution shape
 
+Now the core's, not this batch's:
+
 - Shared lock: `experiments/acceptance/runs/.acceptance.lock`, `flock -n`. A held lock is a
   refusal (75), never a wait.
 - Active-unit query before launching across every known batch family, including
@@ -255,8 +286,9 @@ retried.
   captured, terminal state read back via `systemctl show`, requiring
   `LoadState ∈ {not-found, loaded, merged}`, `ActiveState:SubState ∈ {inactive:dead,
   failed:failed}` and `MainPID = 0`.
-- Before/after `sha256` manifests over: the three scripts, the judged sources, and the
-  three retained samples. Drift ⇒ 78; an unreadable manifest ⇒ 77.
+- Before/after `sha256` manifests over the launcher's selected inputs — the three scripts, the
+  judged package sources, and the three retained samples — with the control sources and core
+  modules added by the host. Drift ⇒ 78; an unreadable manifest ⇒ 77.
 - The payload also snapshots the regular files under `packages/analyzer/node_modules/yaml`
   before and after. That is a two-point content snapshot, **not** provenance: equality says
   the file list and contents were identical at those two moments and nothing more. A
@@ -268,7 +300,8 @@ retried.
 `run.sh` / `payload.sh`: `0` green; `60`–`66` the verifier's own failure codes (passed
 through); `70` refusal; `71` dependency precondition failed; `72` verifier ran but the batch
 is not green; `73` an evidence write failed; `74` the unit did not settle; `75` lock held;
-`76` run-directory collision; `77` hash manifest unreadable; `78` selected-input drift.
+`76` run-directory collision; `77` hash manifest unreadable (and **a relative entry path**);
+`78` selected-input drift.
 
 `retained-export.mjs`: `0` all three matched; `60` sample missing; `61` sample size/hash
 mismatch (or not a regular file); `62` sandbox or node unusable; `63` a child failed without
@@ -280,7 +313,10 @@ usage); `73` an evidence write failed.
 
 `60`/`61` are the **verifier's** codes. They are not a promise about the batch: `run.sh`
 checks its selected inputs with `-f` before launching, so an absent capture usually stops
-the batch earlier as `70`, and a changed one can also surface as `78` drift.
+the batch earlier as `70`, and a changed one can also surface as `78` drift. The launcher
+declares `60`–`66` as allowed workload exits so the core relays them instead of folding them
+into `70`; the payload passes one through **only** when both snapshots were identical, and
+answers `72` otherwise.
 
 PRECONDITION, NOT PERFORMED BY THIS BATCH: the workload imports `yaml`. Nothing here
 installs anything. If `yaml` does not already resolve to exactly **2.9.1** from the
@@ -292,37 +328,36 @@ reads one file; it does not load or run any code from the package.
 ## 9. Artifacts
 
 All raw output goes to `/data/dsh-ecosystem-test-artifacts/runs/<stamp>-profile-dump-retained-export-<pid>-<rand>/`,
-never into the repository:
+never into the repository.
 
-```
-status.txt                  final verdict
-argv.txt                    the exact launch vector
-unit.log                    launcher-captured unit output (sole writer)
-journal.txt                 journalctl for the unit
-envelope-cgroup.txt         raw cgroup files
-envelope-systemctl.txt      raw systemctl show
-envelope-busctl-path.txt    GetUnit reply
-envelope-busctl.txt         get-property reply
-envelope-effective.txt      the values actually read back
-envelope-verdict.txt        mismatch list, or "none"
-memory-gate.txt             the single MemAvailable sample
-syntax.txt                  bash -n results
-dependency.txt              yaml resolution state
-samples-before.txt          sha256 of the three retained inputs
-samples-after.txt           sha256 of the same three, after the run
-yaml-manifest-before.txt    regular files under node_modules/yaml
-yaml-manifest-after.txt     same, after the run
-workload.txt                what was started
-verifier.log                the verifier's fixed-code log
-verifier.rc                 its exit code
-child-<sample>.stdout.bin   the child's stdout bytes, private to this run
-child-<sample>.stderr.bin   the child's stderr bytes, private to this run
-retained-export-result.txt  per-sample outcome, counts and codes
-snapshots.txt               the four snapshot verdicts
-peaks.txt                   memory and pid peaks
-terminal-query.txt          LoadState / ActiveState / SubState / MainPID
-hashes-before.txt / hashes-after.txt / hashes-diff.txt
-```
+Written by the core: `status.txt` (final verdict), `selection.txt`, `control-before.txt`,
+`selected-before.txt`, `active-units.txt`, `argv.txt` (the exact launch vector),
+`requested.txt`, `unit.log` (the host is its sole writer), `launch.txt`, `systemd-run.rc`,
+`journal.txt`/`journal.rc`, `terminal-before.txt`/`terminal-after-stop.txt`/`terminal.txt`/
+`stop.txt`, `ownership.txt`/`ownership-systemctl.txt`, `envelope-systemctl.txt`,
+`envelope-getunit.txt`, `envelope-runtime.txt`, `envelope-effective.txt`,
+`memory-gate.txt` (the single `MemAvailable` sample), `control-after.txt`,
+`selected-after.txt`, `control-diff.txt`, `selected-diff.txt`, `payload-result.txt`,
+`payload-evidence.txt`, `peaks.txt` (memory and pid peaks).
+
+Written by this payload: `syntax.txt` (`bash -n` results), `dependency.txt` (yaml resolution
+state), `dependency-verdict.txt`, `samples-before.txt`/`samples-after.txt` (sha256 of the three
+retained inputs, before and after), `samples-diff.txt`, `yaml-manifest-before.txt`/
+`yaml-manifest-after.txt`/`yaml-manifest-diff.txt` (regular files under `node_modules/yaml`),
+`workload.txt` (what was started, and the pinned root), `verifier.log` (the verifier's
+fixed-code log), `verifier.rc`, `snapshots.txt` (the snapshot verdicts),
+`retained-export-verdict.txt` (`acc_retained_export_verdict`, `acc_samples_snapshot`,
+`acc_yaml_snapshot`, `acc_verifier_rc`), plus the verifier's own
+`retained-export-inputs.txt`, `retained-export-result.txt` and `child-<sample>.*` files.
+
+Changes relative to the pre-migration runner: the cgroup/envelope readback, the memory gate and
+the peak readback are now the core's canonical files and field names, so `envelope-cgroup.txt`,
+`envelope-busctl-path.txt`, `envelope-busctl.txt` and `envelope-verdict.txt` are gone
+(`envelope-effective.txt` carries `mismatch=`); `terminal-query.txt` is replaced by the core's
+three terminal files plus `stop.txt`, `ownership.txt` and `ownership-systemctl.txt`;
+`hashes-before.txt`/`hashes-after.txt`/`hashes-diff.txt` are replaced by `control-*` and
+`selected-*` pairs; `selection.txt` no longer carries the batch's own `artifact_root=` line (the
+pinned root is recorded in `workload.txt` and in the payload's log).
 
 Child stdout/stderr are stored **only** as private files under the run directory. Public
 log lines carry fixed codes and byte counts, never sample text, never a parser message.
@@ -365,25 +400,30 @@ This batch does **not** establish, and must not be read as establishing:
 4. **`yaml` snapshot is not provenance.** It can only catch a change that persisted across
    the two sampling instants; a change made and reverted between them is invisible. It also
    does not verify the tarball the dependency came from.
-5. **The verifier reads a path the caller chooses.** `--artifact-root` is accepted for
-   operational flexibility; the pins are what stop a substituted tree from passing, and a
-   failure is a failure, not a skip. The root must be absolute and free of `..` components.
+5. **The artifact root is no longer redirectable.** The verifier still accepts
+   `--artifact-root`, and the pins are still what stop a substituted tree from passing, but the
+   *batch* now pins the root and refuses (`70`) an override: the canonical launch carries two
+   arguments and a transient service inherits no environment, so there is no faithful channel for
+   it. This is the one capability the migration did not preserve; restoring it would need a
+   reviewed change to the canonical launch contract, not a local workaround.
 6. **Only the happy path has actually run.** Everything above describes designed behaviour.
-   The one executed batch hit no failure: no refusal, no output-limit, no terminated child,
+   The executed batches hit no failure: no refusal, no output-limit, no terminated child,
    no write failure, no retry. The refusal, limit and write-failure paths therefore remain
-   review-only claims — the code implements them, the run did not exercise them. See
-   [§12](#12-running-it) for what the single run did and did not establish.
+   review-only claims — the code implements them, the run did not exercise them. The migrated
+   bytes have not run at all. See [§12](#12-running-it) for what the recorded runs did and did
+   not establish.
 
 ## 12. Running it
 
 ```bash
-bash projects/dsh-compat-platform/scripts/profile-dump-retained-export/run.sh
+bash /root/dsh-ecosystem-spec/projects/dsh-compat-platform/scripts/profile-dump-retained-export/run.sh
 ```
 
-Takes no arguments. `RETAINED_EXPORT_ARTIFACT_ROOT` may override the external artifact
-root.
+Takes no arguments. The path must be absolute (a relative entry path is refused `77` before
+launch). `RETAINED_EXPORT_ARTIFACT_ROOT` is **refused** (`70`) if it names anything other than the
+pinned root — see §0.
 
-**What the one executed run established.** From `cwd = /root/dsh-ecosystem-spec` on
+**What the pre-migration runs established.** From `cwd = /root/dsh-ecosystem-spec` on
 2026-11-08, at platform HEAD `276a8b6`, the launcher ran once and exited `0`. The unit
 `profile-dump-retained-export-20261108T093731Z-811637-29866.service` read back the full
 envelope (memory `402653184`, swap `0`, pids `32`, `cpu.max = 50000 100000`, `Type=exec`,
@@ -391,14 +431,35 @@ envelope (memory `402653184`, swap `0`, pids `32`, `cpu.max = 50000 100000`, `Ty
 ran three children — `probe` `747` B / `denied` `747` B / `script-probe` `991` B on stdout,
 `0` B on stderr, exit `0` each — and settled at `MainPID=0`. Peaks were `60952576` B and
 `17` pids. Capture, selected-input (`11`) and `yaml` manifest (`233` files) snapshots were
-identical before and after.
+identical before and after. The 2026-11-09 rerun reproduced this on the `0.2-draft.1` shape.
 
-**What it did not establish.** Nothing about export completeness, plugin loadability,
-host compatibility, hostile hosts, or the failure paths. The three samples are historical
-captures of a real CLI over a synthetic fixture, replayed — not a re-export on this host.
-The CLI's own suite has its own record — `81/81` on the current `0.2-draft.1` bytes, `65/65` on
-the earlier shape; these three samples are not extra test cases. A plain clone cannot re-verify: the inputs live only under
-`/data/dsh-ecosystem-test-artifacts` and the run directory is not published.
+**What neither established, and the migration cannot claim.** Nothing about export completeness,
+plugin loadability, host compatibility, hostile hosts, or the failure paths. The three samples are
+historical captures of a real CLI over a synthetic fixture, replayed — not a re-export on this
+host. The CLI's own suite has its own record — `81/81` on the current `0.2-draft.1` bytes, `65/65`
+on the earlier shape; these three samples are not extra test cases. A plain clone cannot
+re-verify: the inputs live only under `/data/dsh-ecosystem-test-artifacts` and the run directory
+is not published.
 
 Any further execution needs a separate authorisation. The batch that passed is not a standing
-permission to rerun it.
+permission to rerun it, and this source-only migration is not a run.
+
+## 13. Changes in this migration (for the reviewer)
+
+- `run.sh` no longer computes unit names, hashes, terminal state or the verdict: it validates its
+  own invocation, refuses an artifact-root override, names its selected inputs, and calls
+  `br_host_run` once. Exit `74` (unit did not settle) is now the core's, and the workload-exit map
+  is the core's (`73`→`73`, `124|137|143`→`74`, declared→itself, else `70`).
+- The payload's argument contract is exactly two arguments (`unit`, `run`). The historical third
+  argument is gone; `ARTIFACT_ROOT` is a constant, re-validated (absolute, no `..`, no `//`,
+  directory) because the payload is the process that reads the samples.
+- The payload's own envelope readback, memory gate, evidence counter and peak readback are
+  replaced by `br_envelope_enter`, `br_evidence_gate` and `br_peaks`; `br_payload_finish` writes
+  the canonical `payload-result.txt`/`payload-evidence.txt`/`peaks.txt` and takes the final exit.
+- Unchanged: the syntax and dependency preconditions and their exit `71`, the three sample pins
+  and the yaml two-point snapshot, the workload line (verifier **not** bwrap-wrapped, `env -i`,
+  192 MiB heap), the snapshot-before/verdict/snapshot-after order, the verdict precedence
+  (`samples_snapshot` → `yaml_snapshot` → `verifier_rc`), the four `acc_*` verdict field names,
+  the pass-through of `60`–`66` only when both snapshots are identical, and `72` otherwise.
+- The precedence of `73` (an evidence write failed) over a non-green verdict is unchanged: the
+  payload returns `73` before it considers the verifier's code.

@@ -1,230 +1,173 @@
 #!/bin/bash
-# In-envelope payload for the diagnose ↔ real dsh-compat-spec wiring batch.
+# In-envelope payload for the `diagnose` ↔ real `dsh-compat-spec` wiring batch.
 #
-# STATUS: DRAFT, NEVER EXECUTED. Nothing in this file has been run.
+# SOURCE-ONLY migration to the canonical bounded runner (ABI bounded-runner/1, core
+# commit c8123de). Awaiting Lead bounded verification. These bytes have not been
+# executed, syntax-qualified or sourced.
 #
-# Minimal adaptation of `scripts/diagnose-batch/payload.sh`: it keeps the same
-# envelope self-check, the same single MemAvailable gate, the same two-point yaml
-# dependency snapshot, the same evidence-write gates and the same "relay to
-# stdout, never write unit.log" discipline. What changes is the workload. Instead
-# of running one test file, it drives the `dsh-compat-diagnose` CLI as a **real
-# child process** — absolute node binary, explicit working directory — once per
-# case, and keeps each case's stdout / stderr / exit code as its own file.
+# What the canonical envelope obviates: this file used to prove its own cgroup
+# membership receipt, knob readback, one-shot memory gate, resident-peak readback,
+# evidence-write counter and terminal-state vocabulary. All of that is the core's
+# now. What remains here is the batch: syntax of the two scripts, the static
+# contract, the sibling precondition, the YAML two-point snapshot, six CLI cases
+# as real child processes, and the selected test file.
 #
-# The point of these cases is the wiring between the platform CLI and the REAL
-# validators in the sibling `dsh-compat-spec` checkout. The validator specifiers
-# below are CWD-relative (`../dsh-compat-spec/...`) on purpose: the CLI resolves a
-# `./`/`../` specifier against process.cwd(), so running each case from
-# `$WORKDIR` exercises exactly that branch of resolveModuleTarget against real
-# files. If the sibling checkout is absent this payload refuses (71) instead of
-# letting an unloadable validator masquerade as a usage error.
+# The host alone owns unit.log; this file only relays its own step logs into the
+# run directory.
 #
-# What it can establish: that on these bytes, under these limits, these six
-# invocations exit with these codes and the real validators accept/refuse the
-# real fixtures as expected, and that the wiring test file — which imports the
-# same two real validators in-process — reports every test passing.
-#
-# What it cannot establish: that any plugin would load, that a host observed any
-# of this, that the synthetic example evidence is a real run, or that named
-# sources correlate.
-#
-# Exit codes: 0 green; 70 envelope refusal; 71 static contract or dependency/
-# sibling precondition failed (no case started); 72 a case's exit code did not
-# match its expected code; 73 an evidence write failed; 74 the selected test file
-# did not report a clean TAP run.
+# Payload exit codes: 0 green; 70 envelope/argument/launch-context refusal;
+# 71 static contract, sibling or dependency precondition failed (no case was
+# started); 72 a case, the TAP summary or the test file did not match; 73 an
+# evidence write failed.
 
+set +e
 set -uo pipefail
-
-UNIT=${1:-}
-RUN=${2:-}
 ROOT=/root/dsh-ecosystem-spec
 REPO=$ROOT/projects/dsh-compat-platform
 PKG=$REPO/packages/analyzer
 SPEC=$ROOT/projects/dsh-compat-spec
+SLICE=$REPO/scripts/diagnose-real-wiring
+CORE=$REPO/scripts/bounded-runner
 NODE=/www/server/nodejs/v24.21.0/bin/node
-
-# The CLI to drive and the directory the cases run from. All case paths below are
-# relative to $WORKDIR, and $WORKDIR is the CLI's process.cwd() for every case.
 CLI=$PKG/src/diagnose-cli.js
 WORKDIR=$REPO
-
-EXPECT_MEM_BYTES=402653184      # 384 MiB
-EXPECT_SWAP_BYTES=0
-EXPECT_PIDS=32
-EXPECT_CPU_MAX='50000 100000'   # 50% of one CPU
-EXPECT_RUNTIME_USEC=120000000
-EXPECT_MEMAVAILABLE_KIB=819200
 EXPECT_TEST_SCRIPT='node --test --test-concurrency=1 "tests/*.test.js" "tests/*.test.mjs"'
 EXPECT_YAML_VERSION='2.9.1'
 EXPECT_SELECTED_TEST='tests/diagnose-spec-wiring.test.js'
-
-# Real sibling-checkout inputs every case depends on. Absent → refuse (71), never skip.
+EXPECT_CASE_COUNT=6
+EXPECT_MIN_TESTS=6
+# The sibling checkout is a PRECONDITION, never an installation: these four files
+# must already exist, and their absence is a refusal (71), never a skip.
 SPEC_INPUTS=(
   "$SPEC/src/index.js"
   "$SPEC/src/admission-evidence.js"
   "$SPEC/conformance/positive/01-minimal-tool.json"
   "$SPEC/conformance/negative/01-not-an-object.json"
 )
-
-write_fail=0
-addwf() { write_fail=$((write_fail + 1)); printf 'payload: evidence write failed: %s\n' "$1" >&2; }
-die() { printf 'payload: %s\n' "$2" >&2; exit "$1"; }
-wr() { cat > "$1" || return 1; [ -s "$1" ] || return 1; }
+source "$CORE/common.sh" || exit 70
+source "$CORE/policy.sh" || exit 70
+source "$CORE/envelope.sh" || exit 70
+# The canonical host launches the payload with exactly two arguments.
+[ "$#" -eq 2 ] || exit 70
+br_unit "$1" && br_path "$2" && [ -d "$2" ] || exit 70
+BR_UNIT=$1
+BR_RUN=$2
+RUN=$BR_RUN
 say() { printf '%s\n' "$*"; }
-is_num() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; return 0; }
-read1() {
-  [ -r "$1" ] || { printf ''; return 1; }
-  head -n 1 "$1" 2>/dev/null
-}
-knob1() {
-  local path=$1 n v
-  [ -r "$path" ] || { printf '<ambiguous-or-missing:unreadable>'; return; }
-  n=$(awk 'END { print NR }' "$path" 2>/dev/null)
-  case "$n" in ''|*[!0-9]*) printf '<ambiguous-or-missing:unreadable>'; return ;; esac
-  [ "$n" -eq 1 ] || { printf '<ambiguous-or-missing:%s>' "$n"; return; }
-  v=$(sed -n '1p' "$path" 2>/dev/null)
-  [ -n "$v" ] || { printf '<ambiguous-or-missing:empty>'; return; }
-  printf '%s' "$v"
-}
 
-say "payload: unit=$UNIT run=$RUN"
-
-# ---------------------------------------------------------------- 0. arguments
-case "$UNIT" in
-  *.service) ;;
-  *) die 70 "unit name does not end in .service: '${UNIT}'" ;;
-esac
-[ -n "$RUN" ] || die 70 "run directory argument missing"
-[ -d "$RUN" ] || die 70 "run directory does not exist: $RUN"
-[ -w "$RUN" ] || die 70 "run directory is not writable: $RUN"
-[ -d "$PKG" ] || die 70 "analyzer package missing: $PKG"
-[ -f "$CLI" ] || die 70 "diagnose CLI missing: $CLI"
-[ -d "$WORKDIR" ] || die 70 "work directory missing: $WORKDIR"
-[ -x "$NODE" ] || die 70 "node binary missing: $NODE"
-
-# ---------------------------------------------------------------- 1. envelope readback
-CGROUP="/sys/fs/cgroup/system.slice/$UNIT"
-{
-  printf 'unit=%s\n' "$UNIT"
-  printf 'cgroup=%s\n' "$CGROUP"
-  printf 'cgroup_exists=%s\n' "$([ -d "$CGROUP" ] && echo yes || echo no)"
-  printf 'memory.max=%s\n' "$(knob1 "$CGROUP/memory.max")"
-  printf 'memory.swap.max=%s\n' "$(knob1 "$CGROUP/memory.swap.max")"
-  printf 'pids.max=%s\n' "$(knob1 "$CGROUP/pids.max")"
-  printf 'cpu.max=%s\n' "$(knob1 "$CGROUP/cpu.max")"
-} > "$RUN/envelope-cgroup.txt" || addwf envelope-cgroup.txt
-
-show_raw=$(timeout 20 systemctl show "$UNIT" -p Type -p CPUQuotaPerSecUSec -p MemoryMax -p TasksMax 2>&1)
-show_rc=$?
-printf 'systemctl_show_rc=%s\n%s\n' "$show_rc" "$show_raw" > "$RUN/envelope-systemctl.txt" \
-  || addwf envelope-systemctl.txt
-[ "$show_rc" -eq 0 ] || die 70 "systemctl show failed (rc=$show_rc)"
-
-# RuntimeMaxUSec via busctl, two steps, whole-reply match only (see diagnose-batch):
-# GetUnit yields the object path, then get-property asks for exactly one property.
-getunit_raw=$(timeout 20 busctl --system call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
-  org.freedesktop.systemd1.Manager GetUnit s "$UNIT" 2>&1)
-unit_path_rc=$?
-getunit_nonempty_lines=$(printf '%s\n' "$getunit_raw" | grep -c '[^[:space:]]')
-getunit_path_lines=$(printf '%s\n' "$getunit_raw" \
-  | grep -cE '^o "/org/freedesktop/systemd1/unit/[A-Za-z0-9_/]*"$')
-unit_paths_seen=$(printf '%s\n' "$getunit_raw" | sed -n 's/^o "\(.*\)"$/\1/p' | wc -l)
-unit_path=
-unit_path_ok=no
-if [ "$unit_path_rc" -eq 0 ] \
-   && [ "$getunit_nonempty_lines" -eq 1 ] \
-   && [ "$getunit_path_lines" -eq 1 ] \
-   && [ "$unit_paths_seen" -eq 1 ]; then
-  unit_path=$(printf '%s\n' "$getunit_raw" | sed -n 's/^o "\(.*\)"$/\1/p')
-  unit_path_ok=yes
-fi
-printf 'unit_path=%s\nunit_path_rc=%s\nunit_path_ok=%s\ngetunit_nonempty_lines=%s\n' \
-  "${unit_path:-<none>}" "$unit_path_rc" "$unit_path_ok" "$getunit_nonempty_lines" \
-  > "$RUN/envelope-busctl-path.txt" || addwf envelope-busctl-path.txt
-
-bus_raw=''
-bus_rc=1
-if [ "$unit_path_ok" = yes ]; then
-  bus_raw=$(timeout 20 busctl --system get-property org.freedesktop.systemd1 "$unit_path" \
-    org.freedesktop.systemd1.Service RuntimeMaxUSec 2>&1)
-  bus_rc=$?
-fi
-printf 'busctl_rc=%s\nbusctl_bus_raw<<%s\n' "$bus_rc" "$bus_raw" > "$RUN/envelope-busctl.txt" \
-  || addwf envelope-busctl.txt
-
-acc_runtime_usec=
-acc_runtime_usec_source=unavailable
-if [ "$bus_rc" -eq 0 ]; then
-  case "$bus_raw" in
-    't '*)
-      val=${bus_raw#t }
-      case "$val" in
-        ''|*[!0-9]*) : ;;
-        *) acc_runtime_usec=$val; acc_runtime_usec_source=busctl ;;
-      esac
-      ;;
-  esac
-fi
-
-memory_max=$(knob1 "$CGROUP/memory.max")
-swap_max=$(knob1 "$CGROUP/memory.swap.max")
-pids_max=$(knob1 "$CGROUP/pids.max")
-cpu_max=$(knob1 "$CGROUP/cpu.max")
-unit_type=$(printf '%s\n' "$show_raw" | sed -n 's/^Type=//p')
-unit_type_replies=$(printf '%s\n' "$show_raw" | sed -n 's/^Type=//p' | wc -l)
-[ "$unit_type_replies" -eq 1 ] || unit_type="<ambiguous-or-missing:$unit_type_replies>"
-
-{
-  printf 'memory_max=%s\n' "$memory_max"
-  printf 'swap_max=%s\n' "$swap_max"
-  printf 'pids_max=%s\n' "$pids_max"
-  printf 'cpu_max=%s\n' "$cpu_max"
-  printf 'unit_type=%s\n' "$unit_type"
-  printf 'acc_runtime_usec=%s\n' "$acc_runtime_usec"
-  printf 'acc_runtime_usec_source=%s\n' "$acc_runtime_usec_source"
-} > "$RUN/envelope-effective.txt" || addwf envelope-effective.txt
-
-# ---------------------------------------------------------------- 2. envelope must match
-mismatch=''
-[ "$memory_max" = "$EXPECT_MEM_BYTES" ] || mismatch="$mismatch memory.max=$memory_max"
-[ "$swap_max" = "$EXPECT_SWAP_BYTES" ] || mismatch="$mismatch memory.swap.max=$swap_max"
-[ "$pids_max" = "$EXPECT_PIDS" ] || mismatch="$mismatch pids.max=$pids_max"
-[ "$cpu_max" = "$EXPECT_CPU_MAX" ] || mismatch="$mismatch cpu.max=$cpu_max"
-[ "$unit_type" = exec ] || mismatch="$mismatch Type=$unit_type"
-[ "$acc_runtime_usec" = "$EXPECT_RUNTIME_USEC" ] || mismatch="$mismatch RuntimeMaxUSec=${acc_runtime_usec:-<unreadable>}"
-printf 'envelope_mismatch=%s\n' "${mismatch:-none}" > "$RUN/envelope-verdict.txt" || addwf envelope-verdict.txt
-[ -z "$mismatch" ] || die 70 "envelope does not match the approved limits:$mismatch"
-
-# ---------------------------------------------------------------- 3. memory gate, once
-meminfo_rc=0
-mem_available=$(awk '/^MemAvailable:/ { print $2; exit }' /proc/meminfo 2>/dev/null) || meminfo_rc=$?
-is_num "$mem_available" || meminfo_rc=1
-printf 'mem_available_kib=%s\nthreshold_kib=%s\nmeminfo_rc=%s\n' \
-  "$mem_available" "$EXPECT_MEMAVAILABLE_KIB" "$meminfo_rc" > "$RUN/memory-gate.txt" \
-  || addwf memory-gate.txt
-[ "$meminfo_rc" -eq 0 ] || die 70 "MemAvailable could not be read"
-[ "$mem_available" -ge "$EXPECT_MEMAVAILABLE_KIB" ] || die 70 "MemAvailable ${mem_available} KiB is below ${EXPECT_MEMAVAILABLE_KIB} KiB"
-
-evidence_stop() {
-  printf 'acc_evidence_write_failures=%s\nacc_stop_at=%s\nacc_workload_started=no\n' \
-    "$write_fail" "$1" > "$RUN/evidence-gate.txt" 2>/dev/null || :
-  say "payload: $write_fail evidence write failure(s) at $1; stopping (73) before proceeding"
-  exit 73
+# Conservative TAP normalisation, preserved from the pre-migration batch: the
+# reporter that `node --test` picks is not this batch's choice, so BOTH summary
+# shapes are read — the TAP summary line (`# tests 6`) and the spec reporter's
+# info line (`ℹ tests 6`). The info form is rewritten to the TAP form so the
+# canonical single-summary checker applies to exactly one summary per key either
+# way. Nothing else in the stream is touched.
+normalize_tap() { # source destination
+  LC_ALL=C awk '
+    {
+      line = $0
+      if (line ~ /^# /) { print line; next }
+      body = line
+      sub(/^[^ \t]+[ \t]+/, "", body)
+      if (body ~ /^(tests|pass|fail|cancelled|skipped|todo) [0-9]+$/) {
+        print "# " body
+        next
+      }
+      print line
+    }
+  ' "$1" > "$2"
 }
 
-# ---------------------------------------------------------------- 4. syntax of the batch
-if [ "$write_fail" -ne 0 ]; then evidence_stop before-syntax; fi
-bash -n "$ROOT/projects/dsh-compat-platform/scripts/diagnose-real-wiring/run.sh"
-acc_syntax_run_sh_rc=$?
-bash -n "$ROOT/projects/dsh-compat-platform/scripts/diagnose-real-wiring/payload.sh"
-acc_syntax_payload_sh_rc=$?
-printf 'acc_syntax_run_sh_rc=%s\nacc_syntax_payload_sh_rc=%s\n' \
-  "$acc_syntax_run_sh_rc" "$acc_syntax_payload_sh_rc" > "$RUN/syntax.txt" || addwf syntax.txt
-[ "$acc_syntax_run_sh_rc" -eq 0 ] || die 71 "run.sh does not parse (rc=$acc_syntax_run_sh_rc)"
-[ "$acc_syntax_payload_sh_rc" -eq 0 ] || die 71 "payload.sh does not parse (rc=$acc_syntax_payload_sh_rc)"
+# Two-point YAML snapshot. The manifest is taken over the YAML directory itself
+# and over symlinks: a symlinked tree makes the digest set meaningless, so it is
+# refused rather than hashed.
+snapshot_yaml() { # destination yaml_dir
+  local out=$1
+  local yaml_dir=$2
+  ( cd "$yaml_dir" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum ) > "$out"
+}
 
-# ---------------------------------------------------------------- 5. static contract
-cat > "$RUN/static-contract.mjs" <<'CONTRACT' || { addwf static-contract-write; die 73 "cannot write static-contract.mjs"; }
+# --- one CLI case, as a real child process ---------------------------------
+#
+# The sandbox is deliberately tight: its own pid/ipc/uts namespace, no network,
+# the whole filesystem read-only, and the repository as the working directory.
+# Each case is its own bwrap launch, so no case can observe another's writes.
+CASE_COUNT=0
+CASE_FAIL=''
+run_case() { # id expected_exit argv...
+  local id=$1
+  local expect=$2
+  shift 2
+  local dir=$RUN/cases/$id
+  if ! mkdir -p "$dir"; then
+    br_write_failure "cases/$id"
+    return 73
+  fi
+  CASE_COUNT=$((CASE_COUNT + 1))
+  br_evidence_gate || return 73
+  if ! br_record "$dir/case.txt" 'case=%s\nexpected_exit=%s\nworkdir=%s\nargv:' \
+      "$id" "$expect" "$WORKDIR"; then
+    return 73
+  fi
+  if ! { local a; for a in "$NODE" "$CLI" "$@"; do printf ' %q' "$a"; done; printf '\n'; } >> "$dir/case.txt"; then
+    br_write_failure "cases/$id/case.txt"
+    return 73
+  fi
+  bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
+    --unshare-pid --unshare-net --unshare-ipc --unshare-uts --die-with-parent \
+    --chdir "$WORKDIR" -- \
+    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp \
+      NODE_OPTIONS=--max-old-space-size=192 \
+      "$NODE" "$CLI" "$@" > "$dir/stdout.json" 2> "$dir/stderr.txt"
+  local rc=$?
+  br_record "$dir/exit.txt" '%s\n' "$rc" || :
+  if ! printf 'actual_exit=%s\n' "$rc" >> "$dir/case.txt"; then
+    br_write_failure "cases/$id/case.txt"
+    return 73
+  fi
+  if [ "$rc" -ne "$expect" ]; then
+    CASE_FAIL="$CASE_FAIL $id(rc=$rc!=expect=$expect)"
+  fi
+  # A diagnosis that does not put a JSON object on stdout is not a diagnosis.
+  if [ "$(head -c 1 "$dir/stdout.json" 2>/dev/null)" != '{' ]; then
+    CASE_FAIL="$CASE_FAIL $id(no-json-envelope)"
+  fi
+  return 0
+}
+
+diagnose_real_wiring_payload() {
+  source "$CORE/tap.sh" || return 70
+  # Envelope first: nothing below may run outside the accounted cgroup.
+  br_envelope_enter "$BR_UNIT" "$BR_RUN"
+  local rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
+
+  [ -d "$PKG" ] && [ -f "$CLI" ] && [ -d "$WORKDIR" ] || return 70
+  [ -x "$NODE" ] || return 70
+  command -v bwrap >/dev/null 2>&1 || return 70
+  command -v sha256sum >/dev/null 2>&1 || return 70
+
+  # --- 1. syntax of the two batch scripts --------------------------------
+  # Both are always checked, so one failure never hides the other. This is a
+  # parse-only check of the files; the workload below is what actually runs.
+  br_evidence_gate || return 73
+  bash -n "$SLICE/run.sh"
+  local acc_syntax_run_sh_rc=$?
+  br_evidence_gate || return 73
+  bash -n "$SLICE/payload.sh"
+  local acc_syntax_payload_sh_rc=$?
+  br_record "$RUN/syntax.txt" 'acc_syntax_run_sh_rc=%s\nacc_syntax_payload_sh_rc=%s\n' \
+    "$acc_syntax_run_sh_rc" "$acc_syntax_payload_sh_rc" || :
+  br_evidence_gate || return 73
+  if [ "$acc_syntax_run_sh_rc" -ne 0 ] || [ "$acc_syntax_payload_sh_rc" -ne 0 ]; then
+    return 71
+  fi
+
+  # --- 2. static contract of the CLI package -----------------------------
+  # The package must already declare the wiring this batch exercises; nothing is
+  # installed or repaired here. A missing YAML dependency is reported as a
+  # blocked contract (exit 3 from the contract) rather than a red workload.
+  br_evidence_gate || return 73
+  if ! cat > "$RUN/static-contract.mjs" <<'CONTRACT'
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -318,273 +261,235 @@ say(`static_contract=${fail.length === 0 ? 'pass' : 'fail'}`);
 say(`static_contract_failures=${fail.join(',') || 'none'}`);
 process.exit(fail.length === 0 ? 0 : 1);
 CONTRACT
-
-if [ "$write_fail" -ne 0 ]; then evidence_stop before-static-node; fi
-env -i PATH=/usr/bin:/bin HOME=/tmp \
-  NODE_OPTIONS=--max-old-space-size=192 \
-  EXPECT_PKG_DIR="$PKG" \
-  EXPECT_TEST_SCRIPT="$EXPECT_TEST_SCRIPT" \
-  EXPECT_YAML_VERSION="$EXPECT_YAML_VERSION" \
-  EXPECT_SELECTED_TEST="$EXPECT_SELECTED_TEST" \
-  "$NODE" "$RUN/static-contract.mjs" > "$RUN/static-contract.log" 2>&1
-static_rc=$?
-cat "$RUN/static-contract.log" 2>/dev/null || addwf static-log-relay
-printf 'static_contract_rc=%s\n' "$static_rc" >> "$RUN/static-contract.log" 2>/dev/null \
-  || addwf static-contract-rc-line
-
-if [ "$static_rc" -eq 3 ]; then
-  printf 'acc_static_contract=blocked\nacc_block_reason=yaml_dependency_not_installed\n' \
-    > "$RUN/static-verdict.txt" || addwf static-verdict.txt
-  say "payload: refusing — yaml@$EXPECT_YAML_VERSION does not resolve from the analyzer package."
-  say 'payload: installing is out of scope for this batch and was not attempted.'
-  exit 71
-fi
-if [ "$static_rc" -ne 0 ]; then
-  printf 'acc_static_contract=fail\n' > "$RUN/static-verdict.txt" || addwf static-verdict.txt
-  die 71 "static contract failed (rc=$static_rc)"
-fi
-printf 'acc_static_contract=pass\n' > "$RUN/static-verdict.txt" || addwf static-verdict.txt
-
-# ---------------------------------------------------------------- 5c. sibling precondition
-# The sibling dsh-compat-spec checkout is the whole subject. Its absence is a
-# precondition failure (71), never a skip and never a usage error faked by an
-# unloadable validator.
-sib_missing=''
-for f in "${SPEC_INPUTS[@]}"; do [ -f "$f" ] || sib_missing="$sib_missing $f"; done
-printf 'spec_root=%s\nspec_missing=%s\n' "$SPEC" "${sib_missing:-none}" \
-  > "$RUN/sibling-precondition.txt" || addwf sibling-precondition.txt
-if [ -n "$sib_missing" ]; then
-  say "payload: refusing — sibling dsh-compat-spec input missing:${sib_missing}"
-  say 'payload: a sibling checkout is required; this batch does not fabricate one.'
-  exit 71
-fi
-
-# ---------------------------------------------------------------- 5b. evidence gate
-if [ "$write_fail" -ne 0 ]; then
-  say "payload: $write_fail evidence write failure(s) before the workload; refusing to start it"
-  exit 73
-fi
-
-# yaml dependency snapshot (two instants, must be identical). See diagnose-batch for
-# the precise limits of what this equality does and does not prove.
-yaml_dir="$PKG/node_modules/yaml"
-yaml_manifest() {
-  [ -d "$yaml_dir" ] || return 1
-  [ -L "$yaml_dir" ] && return 1
-  local links
-  links=$(find "$yaml_dir" -type l -print -quit 2>/dev/null)
-  [ $? -eq 0 ] || return 1
-  [ -z "$links" ] || return 1
-  ( cd "$yaml_dir" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum ) || return 1
-}
-yaml_before_count=0
-if yaml_manifest > "$RUN/yaml-manifest-before.txt" 2>/dev/null && [ -s "$RUN/yaml-manifest-before.txt" ]; then
-  yaml_before_count=$(awk 'END { print NR }' "$RUN/yaml-manifest-before.txt")
-else
-  addwf yaml-manifest-before.txt
-  say 'payload: cannot snapshot the yaml dependency regular-file list; refusing to start the workload'
-  exit 73
-fi
-
-# ---------------------------------------------------------------- 6. the workload
-say 'payload: starting the workload'
-{
-  printf 'node=%s\n' "$NODE"
-  printf 'cli=%s\n' "$CLI"
-  printf 'workdir=%s\n' "$WORKDIR"
-  printf 'spec_root=%s\n' "$SPEC"
-} > "$RUN/workload.txt" || addwf workload.txt
-if [ "$write_fail" -ne 0 ]; then
-  say 'payload: evidence write failed before the workload; not starting it'
-  exit 73
-fi
-
-mkdir -p "$RUN/cases" || { addwf cases-dir; exit 73; }
-
-CASE_FAIL=''
-CASE_COUNT=0
-
-# run_case <id> <expected-exit> <cli args...>
-# Each case is one real child process: `bwrap` isolates the namespace, `env -i`
-# scrubs the environment, the absolute node binary runs the CLI, and `--chdir
-# $WORKDIR` makes process.cwd() the directory the CWD-relative validator paths
-# are written against. stdout/stderr/exit go to per-case files.
-run_case() {
-  local id=$1 expect=$2; shift 2
-  local dir="$RUN/cases/$id" rc first
-  mkdir -p "$dir" || { addwf "case-dir-$id"; return 1; }
-  CASE_COUNT=$((CASE_COUNT + 1))
-  # Evidence gate before EVERY case: an unrecorded run is not a run.
-  if [ "$write_fail" -ne 0 ]; then
-    printf 'acc_stop_at=before-case-%s\n' "$id" > "$RUN/evidence-gate.txt" 2>/dev/null || :
-    say "payload: evidence write failure before case $id; stopping (73)"
-    exit 73
+  then
+    br_write_failure static-contract-write
+    return 73
   fi
-  printf 'case=%s\nexpected_exit=%s\nworkdir=%s\nargv:' "$id" "$expect" "$WORKDIR" > "$dir/case.txt" \
-    || addwf "case-meta-$id"
-  printf ' %q' "$NODE" "$CLI" "$@" >> "$dir/case.txt" 2>/dev/null || addwf "case-meta-$id"
-  printf '\n' >> "$dir/case.txt" 2>/dev/null || addwf "case-meta-$id"
+  br_evidence_gate || return 73
+  if ! exec 7>"$RUN/static-contract.log"; then
+    br_write_failure static-contract.log
+    return 73
+  fi
+  env -i PATH=/usr/bin:/bin HOME=/tmp NODE_OPTIONS=--max-old-space-size=192 \
+    EXPECT_PKG_DIR="$PKG" \
+    EXPECT_TEST_SCRIPT="$EXPECT_TEST_SCRIPT" \
+    EXPECT_YAML_VERSION="$EXPECT_YAML_VERSION" \
+    EXPECT_SELECTED_TEST="$EXPECT_SELECTED_TEST" \
+    "$NODE" "$RUN/static-contract.mjs" >&7 2>&1
+  local static_rc=$?
+  exec 7>&-
+  # The contract's own output is relayed to stdout, and the exit code is appended
+  # to its log exactly as before the migration.
+  if ! cat "$RUN/static-contract.log"; then
+    br_write_failure static-log-relay
+  fi
+  if ! printf 'static_contract_rc=%s\n' "$static_rc" >> "$RUN/static-contract.log"; then
+    br_write_failure static-contract-rc-line
+  fi
+  if [ "$static_rc" -eq 3 ]; then
+    br_record "$RUN/static-verdict.txt" \
+      'acc_static_contract=blocked\nacc_block_reason=yaml_dependency_not_installed\n' || :
+    return 71
+  fi
+  if [ "$static_rc" -ne 0 ]; then
+    br_record "$RUN/static-verdict.txt" 'acc_static_contract=fail\n' || :
+    return 71
+  fi
+  br_record "$RUN/static-verdict.txt" 'acc_static_contract=pass\n' || :
 
+  # --- 3. sibling checkout precondition ----------------------------------
+  local spec_missing=''
+  local f
+  for f in "${SPEC_INPUTS[@]}"; do
+    br_path "$f" && [ -f "$f" ] || spec_missing="$spec_missing ${f#"$SPEC"/}"
+  done
+  br_record "$RUN/sibling-precondition.txt" 'spec_root=%s\nspec_missing=%s\n' \
+    "$SPEC" "$spec_missing" || :
+  br_evidence_gate || return 73
+  if [ -n "$spec_missing" ]; then
+    return 71
+  fi
+
+  # --- 4. YAML dependency snapshot, observed and not modified ------------
+  # A tree that cannot be snapshotted is an unrecordable run, not a red
+  # workload: it stops as an evidence-write failure (73) before any case runs.
+  local yaml_dir=$PKG/node_modules/yaml
+  if ! snapshot_yaml "$RUN/yaml-manifest-before.txt" "$yaml_dir"; then
+    br_write_failure yaml-manifest-before.txt
+    return 73
+  fi
+
+  # --- 5. the workload: six CLI cases ------------------------------------
+  br_evidence_gate || return 73
+  br_record "$RUN/workload.txt" 'node=%s\ncli=%s\nworkdir=%s\nspec_root=%s\n' \
+    "$NODE" "$CLI" "$WORKDIR" "$SPEC" || :
+  if ! mkdir -p "$RUN/cases"; then
+    br_write_failure cases
+    return 73
+  fi
+
+  # c1: profile only — the report is assembled from the profile alone.
+  run_case c1-profile-only 0 \
+    --profile examples/diagnose/profile.yml || return $?
+  # c2: profile + a clean static declaration + runtime evidence — all clear.
+  run_case c2-all-clear 0 \
+    --profile examples/diagnose/profile.yml \
+    --static packages/analyzer/fixtures/clean.json \
+    --declaration-validator ../dsh-compat-spec/src/index.js \
+    --runtime examples/diagnose/runtime-evidence.json || return $?
+  # c3: a declaration that is not a valid tool — refused by the validator.
+  run_case c3-static-negative 2 \
+    --profile examples/diagnose/profile.yml \
+    --static packages/analyzer/fixtures/invalid-declaration.json \
+    --declaration-validator ../dsh-compat-spec/src/index.js \
+    --runtime examples/diagnose/runtime-evidence.json || return $?
+  # c4: admission evidence needs attention — exit 1, not a refusal.
+  run_case c4-admission-attention 1 \
+    --profile examples/diagnose/profile.yml \
+    --static packages/analyzer/fixtures/clean.json \
+    --declaration-validator ../dsh-compat-spec/src/index.js \
+    --runtime examples/diagnose/runtime-evidence.json \
+    --admission examples/diagnose/admission-evidence.json \
+    --admission-validator ../dsh-compat-spec/src/admission-evidence.js || return $?
+  # c5: a bare minimal tool as a declaration — insufficient, refused.
+  run_case c5-static-bare-declaration 2 \
+    --static ../dsh-compat-spec/conformance/positive/01-minimal-tool.json \
+    --declaration-validator ../dsh-compat-spec/src/index.js || return $?
+  # c6: clean declarations fed in as admission evidence — grammar refusal.
+  run_case c6-admission-grammar-refusal 2 \
+    --static packages/analyzer/fixtures/clean.json \
+    --declaration-validator ../dsh-compat-spec/src/index.js \
+    --admission packages/analyzer/fixtures/clean.json \
+    --admission-validator ../dsh-compat-spec/src/admission-evidence.js || return $?
+
+  local case_failures=${CASE_FAIL:-none}
+  br_record "$RUN/cases-summary.txt" 'case_count=%s\ncase_failures=%s\n' \
+    "$CASE_COUNT" "$case_failures" || :
+  br_evidence_gate || return 73
+
+  # --- 6. the selected test file -----------------------------------------
+  # The suite is run exactly as the package's test script runs it: no reporter
+  # flag, so the summary format is whatever node chooses — hence normalisation.
+  local test_dir=$RUN/test-file
+  if ! mkdir -p "$test_dir"; then
+    br_write_failure test-file
+    return 73
+  fi
+  br_evidence_gate || return 73
   bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
     --unshare-pid --unshare-net --unshare-ipc --unshare-uts --die-with-parent \
-    --chdir "$WORKDIR" \
-    -- /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp \
-       NODE_OPTIONS=--max-old-space-size=192 \
-       "$NODE" "$CLI" "$@" \
-    > "$dir/stdout.json" 2> "$dir/stderr.txt"
-  rc=$?
-  printf '%s\n' "$rc" > "$dir/exit.txt" || addwf "case-exit-$id"
-  printf 'actual_exit=%s\n' "$rc" >> "$dir/case.txt" 2>/dev/null || addwf "case-meta-$id"
-
-  if [ "$rc" -ne "$expect" ]; then
-    CASE_FAIL="$CASE_FAIL $id(rc=$rc!=expect=$expect)"
+    --chdir "$PKG" -- \
+    /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp \
+      NODE_OPTIONS=--max-old-space-size=192 \
+      "$NODE" --test --test-concurrency=1 "$EXPECT_SELECTED_TEST" \
+      > "$test_dir/stdout.tap" 2> "$test_dir/stderr.txt"
+  local test_rc=$?
+  br_record "$test_dir/exit.txt" '%s\n' "$test_rc" || :
+  if ! normalize_tap "$test_dir/stdout.tap" "$test_dir/stdout.tap.normalized"; then
+    br_write_failure test-file-tap-normalize
+    return 73
   fi
-  # Every case, including the exit-2 cases, must still print a JSON envelope on
-  # stdout. A refusal that produced no envelope would be a different failure.
-  first=$(head -c 1 "$dir/stdout.json" 2>/dev/null)
-  if [ "$first" != '{' ]; then
-    CASE_FAIL="$CASE_FAIL $id(no-json-envelope)"
+  br_evidence_gate || return 73
+  if ! br_record "$test_dir/summary.txt" \
+      'test_file=%s\ncwd=%s\nexit=%s\n' "$EXPECT_SELECTED_TEST" "$PKG" "$test_rc"; then
+    return 73
   fi
-  say "payload: case $id exit=$rc expected=$expect"
-}
 
-# Case argv. Validator specifiers and input paths are CWD-relative to $WORKDIR
-# (the repository root) on purpose. `--static` takes the *analyzer input
-# envelope* `{declarations, availableCapabilities}` — a bare declaration document
-# is a different shape and lands on the static lane's invalid path (case c5).
-run_case "c1-profile-only" 0 \
-  --profile examples/diagnose/profile.yml
+  local tap_rc=0
+  br_tap_check "$test_dir/stdout.tap.normalized" "$test_rc"
+  tap_rc=$?
+  local k value state
+  if ! : > "$test_dir/tap-fields.txt"; then
+    br_write_failure test-file-tap-fields
+    return 73
+  fi
+  for k in tests pass fail cancelled skipped todo; do
+    if value=$(br_tap_value "$test_dir/stdout.tap.normalized" "$k"); then
+      state=ok
+    else
+      state=invalid
+      value='<invalid>'
+    fi
+    if ! printf '%s=%s\n' "$k" "$value" >> "$test_dir/tap-fields.txt"; then
+      br_write_failure test-file-tap-fields
+      return 73
+    fi
+    if ! printf '%s=%s\n' "$k" "$value" >> "$test_dir/summary.txt"; then
+      br_write_failure test-file-summary
+      return 73
+    fi
+    if [ "$state" = invalid ]; then
+      br_record "$test_dir/tap-invalid.txt" '%s\n' "$k" || :
+    fi
+  done
+  br_record "$test_dir/tap-verdict.txt" 'tap_rc=%s\n' "$tap_rc" || :
 
-run_case "c2-all-clear" 0 \
-  --profile examples/diagnose/profile.yml \
-  --static packages/analyzer/fixtures/clean.json \
-  --declaration-validator ../dsh-compat-spec/src/index.js \
-  --runtime examples/diagnose/runtime-evidence.json
-
-run_case "c3-static-negative" 2 \
-  --profile examples/diagnose/profile.yml \
-  --static packages/analyzer/fixtures/invalid-declaration.json \
-  --declaration-validator ../dsh-compat-spec/src/index.js \
-  --runtime examples/diagnose/runtime-evidence.json
-
-run_case "c4-admission-attention" 1 \
-  --profile examples/diagnose/profile.yml \
-  --static packages/analyzer/fixtures/clean.json \
-  --declaration-validator ../dsh-compat-spec/src/index.js \
-  --runtime examples/diagnose/runtime-evidence.json \
-  --admission examples/diagnose/admission-evidence.json \
-  --admission-validator ../dsh-compat-spec/src/admission-evidence.js
-
-run_case "c5-static-bare-declaration" 2 \
-  --static ../dsh-compat-spec/conformance/positive/01-minimal-tool.json \
-  --declaration-validator ../dsh-compat-spec/src/index.js
-
-run_case "c6-admission-grammar-refusal" 2 \
-  --static packages/analyzer/fixtures/clean.json \
-  --declaration-validator ../dsh-compat-spec/src/index.js \
-  --admission packages/analyzer/fixtures/clean.json \
-  --admission-validator ../dsh-compat-spec/src/admission-evidence.js
-
-{
-  printf 'case_count=%s\n' "$CASE_COUNT"
-  printf 'case_failures=%s\n' "${CASE_FAIL:-none}"
-} > "$RUN/cases-summary.txt" || addwf cases-summary.txt
-
-# ---------------------------------------------------------------- 6a2. selected test file
-# One bounded `node --test` run of the wiring test file, from the package
-# directory. It loads the same two real spec validators in-process and exercises
-# the library surface the CLI cases only reach through a command line. A skipped
-# or absent run is never read as a pass.
-test_verdict=not_run
-if [ "$write_fail" -ne 0 ]; then
-  printf 'acc_stop_at=before-test-file\n' > "$RUN/evidence-gate.txt" 2>/dev/null || :
-  say 'payload: evidence write failure before the test file; stopping (73)'
-  exit 73
-fi
-test_dir="$RUN/test-file"
-if mkdir -p "$test_dir"; then
-  bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
-    --unshare-pid --unshare-net --unshare-ipc --unshare-uts --die-with-parent \
-    --chdir "$PKG" \
-    -- /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp \
-       NODE_OPTIONS=--max-old-space-size=192 \
-       "$NODE" --test --test-concurrency=1 "$EXPECT_SELECTED_TEST" \
-    > "$test_dir/stdout.tap" 2> "$test_dir/stderr.txt"
-  test_rc=$?
-  printf '%s\n' "$test_rc" > "$test_dir/exit.txt" || addwf test-exit
-  # The reporter node --test picks is not ours to choose, so both shapes are read:
-  # the TAP summary (`# tests 6`) and the spec summary (`ℹ tests 6`). Both put the
-  # count in the third field.
-  tap_count() {
-    awk -v key="$1" '($1 == "#" || $1 == "ℹ") && $2 == key { value = $3 } END { if (value != "") print value }' \
-      "$test_dir/stdout.tap" 2>/dev/null
-  }
-  tap_tests=$(tap_count tests)
-  tap_pass=$(tap_count pass)
-  tap_fail=$(tap_count fail)
-  {
-    printf 'test_file=%s\n' "$EXPECT_SELECTED_TEST"
-    printf 'cwd=%s\n' "$PKG"
-    printf 'exit=%s\n' "$test_rc"
-    printf 'tap_tests=%s\n' "${tap_tests:-unparsed}"
-    printf 'tap_pass=%s\n' "${tap_pass:-unparsed}"
-    printf 'tap_fail=%s\n' "${tap_fail:-unparsed}"
-  } > "$test_dir/summary.txt" || addwf test-summary.txt
-  if [ "$test_rc" -eq 0 ] && is_num "$tap_tests" && is_num "$tap_pass" && is_num "$tap_fail" \
-     && [ "$tap_fail" -eq 0 ] && [ "$tap_tests" -ge 6 ] && [ "$tap_pass" -eq "$tap_tests" ]; then
-    test_verdict=pass
-  else
+  local test_verdict=pass
+  local tests=0
+  if [ "$tap_rc" -ne 0 ]; then
     test_verdict=fail
-  fi
-  say "payload: test file exit=$test_rc tap=${tap_tests:-?}/${tap_pass:-?}/${tap_fail:-?}"
-else
-  addwf test-dir
-fi
-
-# ---------------------------------------------------------------- 6b. snapshot after
-yaml_snapshot=unreadable
-if yaml_manifest > "$RUN/yaml-manifest-after.txt" 2>/dev/null && [ -s "$RUN/yaml-manifest-after.txt" ]; then
-  if diff -q "$RUN/yaml-manifest-before.txt" "$RUN/yaml-manifest-after.txt" > "$RUN/yaml-manifest-diff.txt" 2>&1; then
-    yaml_snapshot=identical
   else
+    tests=$(br_tap_value "$test_dir/stdout.tap.normalized" tests) || tests=0
+    # The batch is only green if the selected file really carries the suite's
+    # assertions: a file that reports three passing tests must not pass.
+    if ! br_uint "$tests" || [ "$tests" -lt "$EXPECT_MIN_TESTS" ]; then
+      test_verdict=insufficient_tests
+    fi
+  fi
+  br_record "$test_dir/verdict.txt" 'test_verdict=%s\ntests=%s\n' \
+    "$test_verdict" "$tests" || :
+  br_evidence_gate || return 73
+
+  # --- 7. YAML snapshot, second point ------------------------------------
+  if ! snapshot_yaml "$RUN/yaml-manifest-after.txt" "$yaml_dir"; then
+    br_write_failure yaml-manifest-after.txt
+    return 73
+  fi
+  local yaml_snapshot=identical
+  if ! diff -q "$RUN/yaml-manifest-before.txt" "$RUN/yaml-manifest-after.txt" \
+      > "$RUN/yaml-manifest-diff.txt" 2>&1; then
     yaml_snapshot=changed
   fi
-else
-  addwf yaml-manifest-after.txt
-fi
-{
-  printf 'yaml_dir=%s\n' "$yaml_dir"
-  printf 'yaml_manifest_files_before=%s\n' "$yaml_before_count"
-  printf 'yaml_manifest_snapshot_state=%s\n' "$yaml_snapshot"
-} > "$RUN/yaml-manifest.txt" || addwf yaml-manifest.txt
+  local yaml_files
+  yaml_files=$(wc -l < "$RUN/yaml-manifest-before.txt" 2>/dev/null) || yaml_files=0
+  br_record "$RUN/yaml-manifest.txt" \
+    'yaml_dir=%s\nyaml_manifest_files_before=%s\nyaml_manifest_snapshot_state=%s\n' \
+    "$yaml_dir" "$yaml_files" "$yaml_snapshot" || :
+  br_evidence_gate || return 73
 
-# ---------------------------------------------------------------- 7. verdict
-verdict=pass
-if [ -n "$CASE_FAIL" ]; then
-  verdict="case_exit_mismatch"
-elif [ "$CASE_COUNT" -ne 6 ]; then
-  verdict="case_count_${CASE_COUNT}"
-elif [ "$test_verdict" != pass ]; then
-  verdict="test_file_${test_verdict}"
-elif [ "$yaml_snapshot" != identical ]; then
-  verdict="yaml_snapshot_${yaml_snapshot}"
-fi
-printf 'acc_smoke_verdict=%s\nacc_case_failures=%s\nacc_test_file_verdict=%s\nacc_yaml_snapshot=%s\n' \
-  "$verdict" "${CASE_FAIL:-none}" "$test_verdict" "$yaml_snapshot" > "$RUN/case-verdict.txt" || addwf case-verdict.txt
+  # --- 8. verdict --------------------------------------------------------
+  # Order is contractual: a case mismatch outranks a count problem, which
+  # outranks the test file, which outranks the snapshot.
+  local verdict=pass
+  if [ -n "$CASE_FAIL" ]; then
+    verdict=case_exit_mismatch
+  elif [ "$CASE_COUNT" -ne "$EXPECT_CASE_COUNT" ]; then
+    verdict=case_count_$CASE_COUNT
+  elif [ "$test_verdict" != pass ]; then
+    verdict=test_file_$test_verdict
+  elif [ "$yaml_snapshot" != identical ]; then
+    verdict=yaml_snapshot_$yaml_snapshot
+  fi
+  br_record "$RUN/case-verdict.txt" \
+    'acc_smoke_verdict=%s\nacc_case_failures=%s\nacc_test_file_verdict=%s\nacc_yaml_snapshot=%s\n' \
+    "$verdict" "$case_failures" "$test_verdict" "$yaml_snapshot" || :
+  br_evidence_gate || return 73
+  say "case_count=$CASE_COUNT case_failures=${case_failures:-none}"
+  say "test_file_verdict=$test_verdict yaml_snapshot=$yaml_snapshot"
+  say "acc_smoke_verdict=$verdict"
+  if [ "$verdict" = pass ]; then
+    return 0
+  fi
+  # The selected test file keeps its own exit code (74): a clean case list with an
+  # unclean test run is a different failure from a case mismatch, and the launcher
+  # relays whichever number applies.
+  case $verdict in
+    test_file_*) return 74 ;;
+    *) return 72 ;;
+  esac
+}
 
-# ---------------------------------------------------------------- 8. peaks
-{
-  printf 'memory_peak=%s\n' "$(read1 "$CGROUP/memory.peak")"
-  printf 'pids_peak=%s\n' "$(read1 "$CGROUP/pids.peak")"
-} > "$RUN/peaks.txt" || addwf peaks.txt
-
-if [ "$verdict" != pass ]; then
-  say "payload: verdict=$verdict cases=$CASE_COUNT failures=${CASE_FAIL:-none}"
-  exit 72
-fi
-if [ "$write_fail" -ne 0 ]; then
-  say "payload: $write_fail evidence write failure(s)"
-  exit 73
-fi
-say "payload: verdict=pass cases=$CASE_COUNT"
-exit 0
+diagnose_real_wiring_payload
+rc=$?
+br_payload_finish "$rc"
+exit "$?"
