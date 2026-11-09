@@ -1,0 +1,17 @@
+{
+  "declarations": [
+    {
+      "schemaVersion": "0.1.0-draft.1",
+      "plugin": { "id": "example.plugin-alpha", "version": "1.0.0" },
+      "capabilities": { "required": ["svc:example-alpha"], "optional": [] },
+      "resources": [{ "kind": "tool", "name": "example.alpha.run", "scope": "plugin" }]
+    },
+    {
+      "schemaVersion": "0.1.0-draft.1",
+      "plugin": { "id": "example.plugin-beta", "version": "0.2.0" },
+      "capabilities": { "required": [], "optional": [] },
+      "resources": []
+    }
+  ],
+  "availableCapabilities": []
+}

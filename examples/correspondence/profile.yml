@@ -1,0 +1,24 @@
+# == base
+# Synthetic profile dump for the correspondence example. Hand-written to look
+# like what `dsh --profile <name> --dump-config` prints.
+#
+# It is NEVER loaded: no module named here is imported, resolved or executed,
+# and no config value is read. Only the *shape* of each row is observed, which
+# is why the module names point at files that do not exist on purpose.
+#
+# Three rows: two enabled, one `disabled: true`. The correspondence example
+# asserts a plugin for every row; one of those plugins is deliberately not
+# declared, so the demo exits 1 with exactly one finding.
+- id: example-a
+  name: ./example-a.mjs
+  config:
+    greeting: hello
+- id: example-b
+  name: ./example-b.mjs
+  disabled: true
+  config:
+    retries: 2
+- id: example-c
+  name: ./example-c.mjs
+  config:
+    mode: strict

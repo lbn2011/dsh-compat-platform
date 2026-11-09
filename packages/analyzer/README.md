@@ -1261,3 +1261,89 @@ Two limits of that evidence: it is this package's own summary checked against it
 suite — no real DSH export was read and no host was involved — and this section was edited after the
 runs, so the hash of this file at run time is stated in the record rather than being the committed
 one.
+
+## 15. Correspondence check — `dsh-compat-correspondence`
+
+### 15.1 What it reads
+
+Three explicitly named regular files, each read once, each hashed:
+
+1. a **correspondence** document — the caller's assertion that entry *X* is plugin *Y*;
+2. a **profile dump** — the same shape `dsh-compat-profile-dump` summarises;
+3. a **declaration document** — `{ "declarations": [ … ] }`, the shape
+   `dsh-compat-spec` validates.
+
+```
+dsh-compat-correspondence <correspondence.json> --profile <dump.yml> --declaration <manifest.json>
+```
+
+### 15.2 Why this artifact exists
+
+A dump row and a declaration share **no matchable field**. Rows are text-free by construction; a
+declaration carries `plugin.id` and `plugin.version` but no module specifier, while an entry's
+`name` is exactly a module specifier and `EntryOptions` has no version field. Nothing can be matched
+without inventing identity — so the caller states it, and this command checks that the statement is
+internally consistent:
+
+- the bindings digest both documents, so an assertion cannot be replayed against different bytes;
+- every asserted entry id must resolve to **exactly one** row;
+- every asserted plugin id must be declared **exactly once** (or the document reports the duplicate);
+- a row that is `disabled` while its plugin declares capabilities is reported.
+
+### 15.3 Output
+
+One JSON document on stdout, `correspondence-summary/0.1-draft.1`:
+
+```json
+{
+  "correspondenceSummary": "correspondence-summary/0.1-draft.1",
+  "identitySource": "caller-asserted",
+  "bindings": { "profileSha256": "…", "declarationSha256": "…" },
+  "pairs": [ { "index": 1, "line": 21, "disabled": "absent", "config": "mapping",
+               "keyCount": 3, "unmodelledKeyCount": 0, "pluginDeclared": true,
+               "capabilitiesRequired": 1, "capabilitiesOptional": 0,
+               "resources": { "tool": 1, "service": 0 }, "findings": [] } ],
+  "findings": [],
+  "counts": { "pairs": 3, "matched": 3, "refused": 0, "findings": 1 },
+  "certification": false,
+  "correlation": "not-established",
+  "identityDisclosed": false,
+  "notDerived": [ … seven names … ],
+  "limitations": [ … eight codes … ]
+}
+```
+
+No id, name, note or configuration value is ever copied into the output — the assertion goes in, and
+only its verdict comes out. `identityDisclosed` is always `false`.
+
+### 15.4 Exit codes (closed table)
+
+| Code | Meaning |
+| --- | --- |
+| `0` | every asserted pair resolved and no finding |
+| `1` | at least one finding |
+| `2` | refused: stale bindings, malformed correspondence, unreadable profile, entry not found or ambiguous |
+| `5` | internal failure, including a failed stdout write |
+| `64` | usage error |
+
+### 15.5 What this command does **not** establish
+
+It does not load, import, resolve or execute anything. A correspondence is an assertion, so a green
+run means the assertion was well-formed and consistent with these bytes — not that the plugins
+exist, load, activate or provide what they declare. Version correspondence is impossible here, the
+row set is never proven complete, and configuration values are never read. `certification` stays
+`false`.
+
+### 15.6 Verification status
+
+**Executed: three invocations, the last two green on byte-identical inputs (2026-11-09).** Each ran
+[`scripts/correspondence-batch/`](../../scripts/correspondence-batch/README.md) under the same
+384 MiB / swap 0 / 32 tasks / 50 % CPU / 120 s envelope with a 192 MiB heap. Rounds 2 and 3:
+`tests/correspondence.test.js` `43/43`, shipped example exit `1` with exactly one
+`CORRESPONDENCE_PLUGIN_NOT_DECLARED`, stale-bindings demo exit `2` with `CORRESPONDENCE_STALE`,
+static contract pass, eleven selected inputs identical before and after. Peaks `51,462,144` B / `23`
+pids and `51,322,880` B / `23` pids. Round 1 failed at `72` because the runner passed two documents
+positionally instead of through `--profile` / `--declaration`; that round is kept in
+[`docs/testing/2026-11-09-correspondence.md`](../../docs/testing/2026-11-09-correspondence.md)
+at its own numbers. This section was written after the runs, so the run-time hash of this file is
+stated in the record.

@@ -1,0 +1,16 @@
+{
+  "correspondenceVersion": "profile-correspondence/0.1-draft.1",
+  "bindings": {
+    "profileSha256": "6512b8fe1909d8591a3aa2286a436c1e8825ec2163d7ad37b724ef962c401806",
+    "declarationSha256": "fe18f32d3a47d9f749721a44eb8b27c8203e8c3a9017b77ed0eda7384b961f0a"
+  },
+  "pairs": [
+    { "entryId": "example-c", "pluginId": "example.plugin-alpha" },
+    { "entryId": "example-b", "pluginId": "example.plugin-beta" },
+    {
+      "entryId": "example-a",
+      "pluginId": "example.plugin-gamma",
+      "note": "Deliberately not declared: this pair is the one finding the demo produces."
+    }
+  ]
+}
