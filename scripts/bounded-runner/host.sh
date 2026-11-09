@@ -140,10 +140,26 @@ br_host_run() { # core-dir wrapper payload runs-root approved-prefix
   raw=$(timeout 30 systemctl list-units --state=active,activating,deactivating --no-legend --plain "${BR_UNIT_FAMILIES[@]}" 2>&1); rc=$?
   br_record "$BR_RUN/active-units.txt" 'query_rc=%s\n%s\n' "$rc" "$raw" || :
   if [ "$rc" != 0 ] || [ -n "$raw" ]; then br_host_status 70 active-unit-guard; return $?; fi
+  # Declared environment for the payload. A transient service does not inherit the
+  # caller's environment, so a runner that needs to hand the payload one value must
+  # declare it here. Only `--setenv=NAME=value` is accepted: this is a narrow,
+  # inspectable channel, not a general environment passthrough.
+  local -a setenv_argv=()
+  if [ "${BR_SETENV+x}" = x ] && [ "${#BR_SETENV[@]}" -gt 0 ]; then
+    local setenv_entry
+    for setenv_entry in "${BR_SETENV[@]}"; do
+      case "$setenv_entry" in
+        --setenv=[A-Za-z_][A-Za-z0-9_]*=?*) setenv_argv+=("$setenv_entry") ;;
+        *) return 70 ;;
+      esac
+    done
+    br_record "$BR_RUN/setenv.txt" '%s\n' "${BR_SETENV[@]}" || :
+  fi
   local -a argv=(systemd-run --wait --pipe --collect --unit="$BR_UNIT"
     --property=Type=exec --property=MemoryMax=384M --property=MemorySwapMax=0
     --property=TasksMax=32 --property=CPUQuota=50% --property=RuntimeMaxSec=120
-    --working-directory="${payload%/*}" -- /bin/bash "$payload" "$BR_UNIT" "$BR_RUN")
+    --working-directory="${payload%/*}" "${setenv_argv[@]}" --
+    /bin/bash "$payload" "$BR_UNIT" "$BR_RUN")
   br_record "$BR_RUN/argv.txt" '%q ' "${argv[@]}" || :
   br_record "$BR_RUN/requested.txt" 'Type=exec\nMemoryMax=402653184\nMemorySwapMax=0\nTasksMax=32\nCPUQuota=50%%\nRuntimeMaxUSec=120000000\nNodeHeapMiB=192\nMemAvailableMinKiB=819200\n' || :
   br_record "$BR_RUN/unit.log" '%s' '' || :

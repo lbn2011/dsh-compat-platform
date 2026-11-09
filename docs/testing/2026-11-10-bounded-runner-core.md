@@ -1,5 +1,17 @@
 # Bounded runner core — bounded mock qualification record
 
+> **Later change (2026-11-10, after this record's runs).** `host.sh` gained the
+> declared `BR_SETENV` channel (`--setenv=NAME=value`, validated, recorded to
+> `setenv.txt`) so a wrapper can hand its payload one value; a transient service
+> inherits no environment. `core.manifest` was refreshed to the new `host.sh` digest
+> (`08a12b13…`), and the mock qualification was re-run
+> (`/data/dsh-ecosystem-test-artifacts/runs/20261109T194645Z-bounded-runner-qualification-1204712-25203`):
+> `acceptance_exit=0`, negative suite `failures=0`, host-path `top_level_checks=18
+> failures=0`. That suite does **not** exercise the `--setenv` branch; the branch
+> itself has two real executions in
+> [the installer scratch record](2026-11-10-profile-dump-install-scratch.md). The
+> hashes quoted below describe the earlier bytes and are not retracted.
+
 > Date: 2026-11-10. **[Decided] Evidence scope:** the second preserved bootstrap run passed syntax checks and both Bash mock suites for the recorded input bytes. The first run failed before syntax checks or tests began and remains part of this record. This is **mock-only core qualification, not real core lifecycle qualification**, migration acceptance, or release approval.
 
 ## 1. Evidence and chronology

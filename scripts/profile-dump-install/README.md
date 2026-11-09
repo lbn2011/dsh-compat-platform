@@ -1,13 +1,17 @@
-# profile-dump-install — installer acceptance runner (SOURCE-ONLY)
+# profile-dump-install — installer acceptance runner (EXECUTED, MIGRATED)
 
-**STATUS: MIGRATED (ABI `bounded-runner/1`, core `c8123de`); the install workload was
-refused by design on 2026-11-10 because its target already existed.**
+**STATUS: MIGRATED (ABI `bounded-runner/1`) and the success path is now verified.**
+Two bounded rounds on 2026-11-10 installed into a **named scratch target** — the real
+`packages/analyzer/node_modules/yaml` was left untouched and proven unchanged by a
+digest pair taken around each launch. Both rounds: `acceptance_exit=0`, SHA-512
+matched the pinned value, tgz sha256 `4ef6c54c…` (the same bytes as 2026-11-08),
+233 files, `manifest_verify_rc=0`, version `2.9.1`, peak 15.8 MiB / 4 pids.
+The produced tree is byte-identical to the one already installed
+(`07d71533…`, 233 files, `diff -r` clean). Record:
+[`../../docs/testing/2026-11-10-profile-dump-install-scratch.md`](../../docs/testing/2026-11-10-profile-dump-install-scratch.md).
 
-The migrated launcher ran once and refused before any unit was created, printing
-`install target already exists (this batch never replaces it)`. That is the documented
-rule, not a failure: an existing installation is never overwritten. The numbers below
-are the ones recorded by the **pre-migration** version and remain history for their own
-bytes; the migrated installer's success path is **not** verified this round.
+That earlier refusal is still the rule: with no override the batch targets the real
+dependency directory, and an existing target is **never** replaced (`70`).
 
 Invoke by **absolute** path: the core binds every source frame to an absolute control
 list, so a relative entry refuses with 77 before any lock, run directory or unit.
@@ -21,11 +25,13 @@ record, including the two acceptance rounds that then consumed this install, is
 That record describes the pre-migration runners; it is not evidence about these
 bytes.
 
-**That install target now exists.** `packages/analyzer/node_modules/yaml` is
-already present, so on this machine the migrated launcher refuses `70` at its
-target-absent precondition before any unit is created. That is the designed
-behaviour of a one-time installer, not a fault: a re-run requires the tree to be
-inspected and removed by hand first.
+**Installing somewhere else.** Set `PROFILE_DUMP_INSTALL_NODE_MODULES` to an absolute
+directory that does not exist; the archive is installed at `<that directory>/yaml`.
+The launcher passes it to the payload through the core's declared `--setenv` channel
+(a transient service does not inherit the caller's environment), records it in
+`setenv.txt` and in `real-target.txt`, and exits `72` if the real dependency tree's
+digest changes during the run. The path must not be under `/tmp`: the extraction
+sandbox masks `/tmp` with a private `tmpfs`.
 
 What this batch owns is the workload and the subject — the download, the pinned
 digest, the extraction rules and the manifest re-verification. The resource

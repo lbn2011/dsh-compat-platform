@@ -119,8 +119,8 @@ Two scope boundaries are now explicit rather than implied:
 
 > **Migration status (2026-11-10, updated):** the twelve pre-existing pairs are
 > migrated. Eleven were executed under the envelope and passed;
-> `profile-dump-install` refused by design because its target already exists, so
-> its migrated success path is unverified. A thirteenth pair
+> `profile-dump-install` refused by design on its first attempt because its target
+> already exists. A thirteenth pair
 > (`scripts/config-check-batch`, the checker's own batch) was written on the same
 > core and executed green twice. The core then gained `config-check-batch` in
 > `br_prefix_allowed` and in `BR_UNIT_FAMILIES`, `core.manifest` was refreshed,
@@ -135,6 +135,46 @@ Two scope boundaries are now explicit rather than implied:
 > The configuration checker **is** implemented and measured (59 unit tests, four
 > CLI cases, two green rounds); what it does not do is extract a configuration
 > value from a profile — that remains a separate disclosure decision.
+
+### Decisions taken 2026-11-10 (after the checker was published)
+
+**D-D — configuration values stay outside the platform. [Decided]**
+No tool in this repository reads a `config:` value out of a profile. The checker
+consumes an instance document that the caller supplies (or the caller's own exported
+file); the platform's own artifacts continue to carry counts, closed words and
+digests only. Reasons: the values are usually credentials; every artifact produced so
+far rests on "structure, never values"; and a reader who sees a correspondence plus a
+contract could otherwise conclude that the configuration was checked when only its
+schema was.
+Consequences: `dsh-compat-config-check` is an author-side/per-caller tool. A profile
+reader would be a new disclosure decision with its own leak tests, and would also need
+its own `notDerived` entry and limitation — the existing artifacts already say
+`CONFIG_VALUES_NOT_INSPECTED` (profile dump) and `CONFIG_VALUES_NOT_COMPARED`
+(correspondence), and the checker's summary says
+`NO_CONFIGURATION_VALUE_IS_EVER_EMITTED`.
+
+**D-E — the JSON Schema engine stays unpatched. [Decided]**
+The reproduced literal defect (14 of 22 cases; see
+`docs/testing/2026-11-10-config-engine-reproduction.md`) is answered by `not-checked`,
+never by a local patch. Reasons: a patched copy would make the acquisition chain stop
+proving "these bytes are the registry's bytes"; the patch would have to be maintained
+across upgrades; and the alternative engine examined was not a drop-in.
+Consequences: a contract whose schema carries identifier-like keys inside
+`const`/`enum`/`default`/`examples` gets exit `2` and no verdict. Revisiting this
+requires a separately reviewed patch proposal, the 22-case suite as the gate, and an
+explicit statement in the produced artifact that the engine is not the upstream
+package.
+
+**D-F — the installer's success path is exercised against a named target. [Decided]**
+`profile-dump-install` accepts `PROFILE_DUMP_INSTALL_NODE_MODULES`; the real
+dependency tree is never replaced, and the launcher proves it was untouched by taking
+its digest before and after the launch (a change exits `72`). This required one core
+addition: the declared `BR_SETENV` channel, because a transient service does not
+inherit the caller's environment. Measured: two green rounds, the produced tree
+byte-identical to the installed one
+(`docs/testing/2026-11-10-profile-dump-install-scratch.md`). The default path (install
+into the real location) still has no green run on this machine and is documented as
+such.
 
 ## Appendix A. Quick reference
 

@@ -48,7 +48,11 @@ REPO=$ROOT/projects/dsh-compat-platform
 SLICE=$REPO/scripts/profile-dump-install
 CORE=$REPO/scripts/bounded-runner
 PKG=$REPO/packages/analyzer
-NM="$PKG/node_modules"
+# The install location is overridable so that the SUCCESS path can be exercised
+# without replacing a dependency that is already installed. The default is the
+# real location and the refusal below still applies to whatever path is named:
+# an existing target is never replaced, wherever it lives.
+NM="${PROFILE_DUMP_INSTALL_NODE_MODULES:-$PKG/node_modules}"
 TARGET="$NM/yaml"
 NODE=/www/server/nodejs/v24.21.0/bin/node
 

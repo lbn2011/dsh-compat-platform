@@ -53,6 +53,15 @@ set -uo pipefail
   SLICE=$REPO/scripts/profile-dump-install
   CORE=$REPO/scripts/bounded-runner
   NODE=/www/server/nodejs/v24.21.0/bin/node
+  # Where the archive is installed. The default is the real dependency location.
+  # Setting PROFILE_DUMP_INSTALL_NODE_MODULES points it somewhere else (for example
+  # inside this run's directory) so the success path can be exercised without
+  # replacing an installed dependency. An existing target is still never replaced.
+  NM_BASE="${PROFILE_DUMP_INSTALL_NODE_MODULES:-$PKG/node_modules}"
+  NM_TARGET="$NM_BASE/yaml"
+  # A transient service does not inherit this shell's environment, so the value the
+  # payload needs is declared to the core explicitly rather than exported.
+  BR_SETENV=("--setenv=PROFILE_DUMP_INSTALL_NODE_MODULES=$NM_BASE")
   # Raw artifacts live OUTSIDE the repository; only the narrative record is committed.
   RUNS=${PROFILE_DUMP_INSTALL_RUNS_ROOT:-/data/dsh-ecosystem-test-artifacts/runs}
   [ "$#" -eq 0 ] || exit 70
@@ -87,14 +96,44 @@ set -uo pipefail
   # Refuse BEFORE creating a unit when the install target is already present. The
   # payload repeats this check inside the envelope, because the tree can appear
   # between launch and workload.
-  if [ -e "$PKG/node_modules/yaml" ] || [ -L "$PKG/node_modules/yaml" ]; then
+  if [ -e "$NM_TARGET" ] || [ -L "$NM_TARGET" ]; then
     printf 'refusing: install target already exists (this batch never replaces it): %s\n' \
-      "$PKG/node_modules/yaml" >&2
+      "$NM_TARGET" >&2
     exit 70
   fi
+  # The real dependency directory is not the target when an override is in use.
+  # Its digest is taken before and after so a scratch run can prove that it left
+  # the installed tree alone.
+  real_target=$PKG/node_modules/yaml
+  tree_digest() { # directory -> digest over sorted (name, bytes), or a word
+    local d=$1 out
+    if [ ! -e "$d" ]; then printf 'absent'; return 0; fi
+    if [ ! -d "$d" ]; then printf 'not-a-directory'; return 0; fi
+    out=$( cd "$d" 2>/dev/null \
+      && find . -type f -print0 2>/dev/null \
+      | LC_ALL=C sort -z \
+      | while IFS= read -r -d '' f; do sha256sum "$f"; done \
+      | sha256sum 2>/dev/null | cut -d' ' -f1 )
+    if [ -z "$out" ]; then printf 'unreadable'; return 0; fi
+    printf '%s' "$out"
+  }
+  real_before=$(tree_digest "$real_target")
   br_host_run "$CORE" "$SLICE/run.sh" "$SLICE/payload.sh" "$RUNS" profile-dump-install
   rc=$?
-  printf 'run_dir=%s\nacceptance_exit=%s\n' "${BR_RUN:-not-created}" "$rc"
+  real_after=$(tree_digest "$real_target")
+  if [ "$real_before" = "$real_after" ]; then real_state=unchanged; else real_state=changed; fi
+  if [ -n "${BR_RUN:-}" ] && [ -d "${BR_RUN:-}" ]; then
+    printf 'install_node_modules=%s\ninstall_target=%s\nreal_target=%s\nreal_target_digest_before=%s\nreal_target_digest_after=%s\nreal_target_state=%s\n' \
+      "$NM_BASE" "$NM_TARGET" "$real_target" "$real_before" "$real_after" "$real_state" \
+      > "${BR_RUN}/real-target.txt" || printf 'launcher: could not record real-target.txt\n' >&2
+  fi
+  if [ "$real_state" = changed ]; then
+    printf 'refusing: the real install target changed during this run: %s\n' "$real_target" >&2
+    printf 'run_dir=%s\nacceptance_exit=72\n' "${BR_RUN:-not-created}"
+    exit 72
+  fi
+  printf 'run_dir=%s\nacceptance_exit=%s\ninstall_target=%s\nreal_target=%s\nreal_target_digest_before=%s\nreal_target_digest_after=%s\n' \
+    "${BR_RUN:-not-created}" "$rc" "$NM_TARGET" "$real_target" "$real_before" "$real_after"
   exit "$rc"
 )
 exit "$?"
