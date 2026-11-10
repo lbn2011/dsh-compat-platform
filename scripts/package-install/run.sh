@@ -75,6 +75,7 @@ set -uo pipefail
   # named selection, not a dependency closure.
   BR_SELECTED_INPUTS=(
     "$SLICE/consumer-check.mjs"
+    "$SLICE/publish_audit.py"
     "$SLICE/expect.json"
     "$REPO/packages/analyzer/package.json"
     "$REPO/packages/analyzer/README.md"

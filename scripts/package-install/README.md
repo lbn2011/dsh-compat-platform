@@ -95,7 +95,7 @@ mismatch, never a silent pass.
 1. Enters the core's envelope receipt, which reads the cgroup limits and refuses
    unless they match: 384 MiB, swap 0, `TasksMax=32`, `CPUQuota=50%`,
    `RuntimeMaxSec=120`, plus one `MemAvailable >= 819200` KiB gate.
-2. Parses the two scripts and `consumer-check.mjs`.
+2. Parses the two scripts, `consumer-check.mjs` and `publish_audit.py`.
 3. Static contract on the four manifests: names, versions, `private: true`,
    `type: module`, the analyzer's single exact `yaml` dependency and zero dependencies
    everywhere else, every `exports` target existing on disk, and each `files` list
@@ -103,13 +103,18 @@ mismatch, never a silent pass.
 4. `npm pack --offline` each package plus `yaml` inside a sandbox with only the
    artifact and npm-home directories writable. Five tarballs, hashed and
    size-recorded.
+4b. **Publish readiness**: `publish_audit.py` opens each tarball and lists its regular
+   files. Only `package/package.json`, `package/README.md` and `package/src/**` may
+   appear; anything else is a violation and fails the step with `74`. It also records —
+   never resolves — the decisions a public release would need: missing `license`,
+   `private: true`, a placeholder version. Output: `publish-readiness.json/.txt`.
 5. `npm install --offline --no-audit --no-fund <five tarballs>` into a fresh consumer
    directory whose `package.json` names nothing.
 6. Runs `consumer-check.mjs` in the consumer directory: resolves each documented
    subpath through `createRequire(...).resolve`, asserts the resolved path is under
    that consumer's `node_modules`, checks installed versions, resolves `yaml@2.9.1`,
    calls `summarizeProfileDumpText` on a two-line fixture (expecting
-   `profile-dump-summary/0.2-draft.1`, one entry) and `decideApply` on an invalid plan
+   `profile-dump-summary/0.3-draft.1`, one entry) and `decideApply` on an invalid plan
    (expecting `refused` / `APPLY_PLAN_INVALID`).
 7. The **missing-dependency probe**: copies the installed consumer, deletes
    `node_modules/yaml` from the copy, imports `dsh-compat-platform/profile-dump` there
@@ -142,7 +147,9 @@ Payload:
 - `70` envelope/argument/precondition refusal;
 - `71` a script or the probe does not parse, or the static contract failed;
 - `72` pack, offline install, consumer probe or missing-dependency probe failed;
-- `73` an evidence write failed.
+- `73` an evidence write failed;
+- `74` a tarball carries a file outside its `files` allowlist (or its name cannot be
+  matched to a manifest).
 
 Launcher (relaying the core):
 
@@ -192,8 +199,8 @@ pairs.
 
 ## Selected inputs (hashed before and after)
 
-The launcher names 19 files; the core hashes them twice and reports drift as `78`:
-`consumer-check.mjs`, `expect.json`, the four `packages/*/package.json`, the four
+The launcher names 20 files; the core hashes them twice and reports drift as `78`:
+`consumer-check.mjs`, `publish_audit.py`, `expect.json`, the four `packages/*/package.json`, the four
 `packages/*/README.md`, `packages/analyzer/src/{profile-dump,dependency-shape,diagnose}.js`,
 `packages/host/src/{index,envelope,page}.js`,
 `packages/runtime/src/isolation-policy.js`, `packages/repair/src/repair-apply.js`, and
@@ -211,6 +218,8 @@ appearance is not drift.
 - **Nothing is published.** Every manifest stays `private: true`; `npm pack` produces a
   tarball, not a release. A green run says the tarball contents and the export map
   agree with what the probe imports — not that a registry would accept the package.
+  The publish audit lists the decisions a release needs (license, `private`, version)
+  and deliberately does not take any of them.
 - **The consumer is this machine.** The probe runs on the same Node build as the
   packing side. A different Node, a different platform, or a real dependency tree could
   behave differently.

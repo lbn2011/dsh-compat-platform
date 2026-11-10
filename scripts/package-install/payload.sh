@@ -41,6 +41,7 @@ SLICE=$REPO/scripts/package-install
 CORE=$REPO/scripts/bounded-runner
 NODE=/www/server/nodejs/v24.21.0/bin/node
 NPM=/www/server/nodejs/v24.21.0/bin/npm
+PYTHON=/usr/bin/python3
 
 source "$CORE/common.sh" || exit 70
 source "$CORE/policy.sh" || exit 70
@@ -250,6 +251,19 @@ CONTRACT
       grep -h 'total files' "$f" 2>/dev/null || true
     done
   } > "$RUN/tarball-file-counts.txt" || br_write_failure tarball-file-counts.txt
+
+  # ------------------------------------------------------------ 4b. publish readiness
+  # The tarball is the unit a consumer receives, so the audit reads the tarballs
+  # themselves rather than the working tree: an allowlist that is right in git and
+  # wrong in the tarball would pass every earlier step.
+  br_evidence_gate || { refuse 73 "evidence write failed before publish audit"; return 73; }
+  local audit_rc=1
+  "$PYTHON" -I "$SLICE/publish_audit.py" --artifacts "$ART" --repo "$REPO" \
+    --out "$RUN/publish-readiness.json" > "$RUN/publish-readiness.txt" 2> "$RUN/publish-readiness.err"
+  audit_rc=$?
+  br_record "$RUN/publish-audit.rc" 'publish_audit_rc=%s\n' "$audit_rc" || :
+  cat "$RUN/publish-readiness.txt" 2>/dev/null || br_write_failure publish-audit-stdout
+  [ "$audit_rc" -eq 0 ] || { refuse 74 "publish audit: a tarball carries a file outside its allowlist"; return 74; }
 
   # ------------------------------------------------------------ 5. consumer install
   local CONSUMER=$RUN/consumer
