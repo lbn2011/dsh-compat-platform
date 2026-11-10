@@ -19,8 +19,9 @@
 # there by package specifier.
 #
 # What it cannot establish: that anything is publishable, that the versions are right for
-# a registry, or that a consumer's own runtime matches this one. `private: true` stays in
-# every manifest; nothing is published.
+# a registry, or that a consumer's own runtime matches this one. `private` is absent from
+# every manifest (cleared 2026-11-10 on explicit approval) and nothing is published: this
+# batch still has no network access and no registry credentials.
 #
 # npm is ALWAYS `--offline` with an explicit `--cache` under a HOME inside the run
 # directory, so nothing can be fetched and no user npmrc/cache is consulted.
@@ -121,8 +122,11 @@ for (const [dir, want] of Object.entries(expected)) {
   if (manifest.name !== want.name) fail.push(`name:${dir}`);
   say(`version_${dir}=${manifest.version === want.version ? 'pass' : 'fail'}`);
   if (manifest.version !== want.version) fail.push(`version:${dir}`);
-  say(`private_${dir}=${manifest.private === true ? 'pass' : 'fail'}`);
-  if (manifest.private !== true) fail.push(`private:${dir}`);
+  // The user cleared `private` on 2026-11-10, so the assertion is now the opposite
+  // direction: a manifest that still says `private: true` would silently block the
+  // publish this batch is preparing for.
+  say(`private_absent_${dir}=${manifest.private === undefined ? 'pass' : 'fail'}`);
+  if (manifest.private !== undefined) fail.push(`private:${dir}`);
   say(`type_${dir}=${manifest.type === 'module' ? 'pass' : 'fail'}`);
   if (manifest.type !== 'module') fail.push(`type:${dir}`);
   const deps = Object.keys(manifest.dependencies ?? {});
@@ -286,7 +290,12 @@ CONTRACT
   # wrong in the tarball would pass every earlier step.
   br_evidence_gate || { refuse 73 "evidence write failed before publish audit"; return 73; }
   local audit_rc=1
+  # --standard public is now the target: the user cleared `private` on 2026-11-10, so the
+  # audit must measure the standard the packages are actually aiming at. Under it a
+  # manifest that still says `private: true` is a blocker, which is the failure mode this
+  # batch now has to catch.
   "$PYTHON" -I "$SLICE/publish_audit.py" --artifacts "$ART" --artifacts "$ART_OWN" --repo "$REPO" \
+    --standard public \
     --out "$RUN/publish-readiness.json" > "$RUN/publish-readiness.txt" 2> "$RUN/publish-readiness.err"
   audit_rc=$?
   br_record "$RUN/publish-audit.rc" 'publish_audit_rc=%s\n' "$audit_rc" || :

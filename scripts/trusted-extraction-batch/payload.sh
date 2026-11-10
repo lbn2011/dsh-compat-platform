@@ -99,7 +99,7 @@ import { readFileSync, existsSync } from 'node:fs'
 const pkg = JSON.parse(readFileSync('$PKG/package.json', 'utf8'))
 const problems = []
 if (pkg.name !== 'dsh-compat-trusted-extraction') problems.push('name')
-if (pkg.private !== true) problems.push('private')
+if (pkg.private !== undefined) problems.push('private:' + String(pkg.private))
 if (pkg.type !== 'module') problems.push('type')
 for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
   if (pkg[field] !== undefined) problems.push('dependency:' + field)

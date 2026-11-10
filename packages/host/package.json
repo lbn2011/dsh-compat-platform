@@ -1,7 +1,6 @@
 {
   "name": "dsh-compat-diagnostics-ui",
   "version": "0.1.0-draft.1",
-  "private": true,
   "type": "module",
   "description": "Read-only host route that displays one dsh-compat-diagnose envelope. Serves a static page and the envelope JSON verbatim; performs no analysis and writes nothing.",
   "engines": {

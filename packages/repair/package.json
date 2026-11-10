@@ -1,7 +1,6 @@
 {
   "name": "dsh-compat-repair",
   "version": "0.1.0-draft.1",
-  "private": true,
   "type": "module",
   "description": "Typed repair plans, a preview that never writes, and an apply confined to one fixture directory.",
   "engines": {

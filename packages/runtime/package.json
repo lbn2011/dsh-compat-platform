@@ -1,7 +1,6 @@
 {
   "name": "dsh-compat-trusted-extraction",
   "version": "0.1.0-draft.1",
-  "private": true,
   "type": "module",
   "description": "Read-only, isolated observation of a synthetic DSH profile's entry outcomes.",
   "engines": {

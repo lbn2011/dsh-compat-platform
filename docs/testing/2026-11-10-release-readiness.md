@@ -1,5 +1,11 @@
 # Release readiness: MIT, real versions, and a standard-aware audit (2026-11-10)
 
+> **Later change (2026-11-10):** the user approved clearing `private`. That flag is now absent
+> from all five platform manifests and from `dsh-compat-spec`, the audit's default standard is
+> `public`, and both standards measure **0 blockers** on all five packages. See
+> `docs/testing/2026-11-10-publishable.md`. The numbers below describe the bytes measured
+> *before* that decision and are not additive with the later rounds.
+
 ## 0. What this slice decides and what it does not
 
 The publish audit had been reporting the same three blockers on every package: no `license`

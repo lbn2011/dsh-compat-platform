@@ -281,9 +281,11 @@ The audit answers two different questions and no longer conflates them:
 * `--standard public` — `"private": true` becomes a blocker, because it would silently
   prevent the publish.
 
-The standard is recorded in the document and in every package row. On the current bytes,
-`private` reports **0 blockers on all five packages**; `public` reports exactly one —
-`PRIVATE_FLAG_SET` — which is a user decision, not a repository defect.
+The standard is recorded in the document and in every package row, and `public` is now the
+default. On the current bytes **both standards report 0 blockers on all five packages**:
+`private` was cleared on explicit approval on 2026-11-10, so `PRIVATE_FLAG_SET` no longer
+fires. The `private` standard is kept because the roadmap literally asked for a private
+candidate and a future reader should be able to re-measure that state.
 
 `@dsh-compat/config-check` is packed into `tarballs-own/` and audited from there: its two
 `@hyperjump/*` peers are not installed on this machine, so it cannot join the offline consumer

@@ -1,7 +1,6 @@
 {
   "name": "@dsh-compat/config-check",
   "version": "0.1.0-draft.1",
-  "private": true,
   "type": "module",
   "description": "Configuration contract checking for the DSH compatibility protocol: a JSON Schema 2020-12 instance check over an acquired, unpatched engine, with explicit not-checked outcomes.",
   "engines": {

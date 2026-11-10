@@ -12,12 +12,14 @@ What this answers, and nothing more:
 Two standards are measured, because "not publishable" and "not ready" are
 different statements:
 
-  * ``--standard private`` (default) — the target is a *private* release candidate,
-    which is what the roadmap asks for (P5: "private release candidate"; "npm scope,
-    license, remote, release and publication remain user decisions"). Under this
-    standard ``"private": true`` is the intended state, not a blocker.
-  * ``--standard public`` — the target is a public npm publication. Here
-    ``"private": true`` is a blocker, because it would silently prevent the publish.
+  * ``--standard public`` (default since 2026-11-10) — the target is a public npm
+    publication. ``"private": true`` is a blocker here, because it would silently
+    prevent the publish; the user cleared that flag on every package on 2026-11-10
+    after the roadmap reserved the decision ("npm scope, license, remote, release
+    and publication remain user decisions").
+  * ``--standard private`` — the target is a private release candidate, which is what
+    P5 literally asks for. Under this standard ``"private": true`` would be the
+    intended state, not a blocker.
 
 Everything else (missing fields, placeholder versions, an undecided license) is a
 blocker under both standards.
@@ -123,7 +125,7 @@ def main():
     )
     parser.add_argument("--repo", required=True)
     parser.add_argument("--out", required=True)
-    parser.add_argument("--standard", choices=("private", "public"), default="private")
+    parser.add_argument("--standard", choices=("private", "public"), default="public")
     args = parser.parse_args()
 
     packages = []

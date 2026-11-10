@@ -1,7 +1,6 @@
 {
   "name": "dsh-compat-platform",
   "version": "0.1.0-draft.1",
-  "private": true,
   "type": "module",
   "description": "Static declaration analysis without executing analyzed plugins. Pure library plus CLI with an explicitly selected trusted validator.",
   "engines": {
