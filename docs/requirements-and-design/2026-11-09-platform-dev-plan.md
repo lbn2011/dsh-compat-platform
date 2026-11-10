@@ -157,6 +157,18 @@ missing-dependency failure — but nothing is published and `files` is not audit
 
 Gate: two host versions with separate records, no compatibility claim beyond what ran.
 
+**Status 2026-11-10: partly done, still not a two-version matrix.** Option **A** was taken — the
+installed `0.2.2-rc.1` became a measured row (runtime receipt byte-identical across four rounds,
+fixture observation in the same launch; `docs/testing/2026-11-10-second-baseline.md`). Option **C**
+was taken as well: a per-tarball `files` allowlist audit plus the list of decisions a release needs
+(`docs/testing/2026-11-10-publish-readiness.md`). Option **B** was taken last and measured the
+*published* `0.2.2-alpha.2`: its manifest, and the export surface of the `dsh-app-boot` build it
+depends on (`boot` and `auditStartupEntries` both present; `docs/testing/2026-11-10-second-version-baseline.md`).
+What is still missing is the actual matrix: no second *installed tree* exists, because that
+release's 91 direct dependencies do not install inside a 120 s envelope (measured — the unit was
+killed). So the honest state is one measured runtime, one measured published artifact, and the
+link between them (a commit pin) still declared only.
+
 ### Blocked items
 
 - **G9 configuration mismatch** stays blocked until the D-A identity decision. The plan does not
