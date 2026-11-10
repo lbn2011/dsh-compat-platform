@@ -33,6 +33,14 @@ The launcher passes it to the payload through the core's declared `--setenv` cha
 digest changes during the run. The path must not be under `/tmp`: the extraction
 sandbox masks `/tmp` with a private `tmpfs`.
 
+**The layout is also used, not only built.** After the manifest check, the payload copies
+this package's `package.json` and `src` into `<prefix>/node_modules/dsh-compat-platform`,
+symlinks the freshly installed `yaml` beside it, resolves `yaml` from the copy (the
+resolved path is recorded and must lie inside the prefix) and runs the copied CLI over
+the shipped example, requiring `profile-dump-summary/0.3-draft.1`. That is the layout a
+consumer sees; the manifest check alone only shows that an archive extracts. Measured
+twice on 2026-11-10 — see `docs/testing/2026-11-10-installer-default-layout.md`.
+
 What this batch owns is the workload and the subject — the download, the pinned
 digest, the extraction rules and the manifest re-verification. The resource
 envelope, the shared lock, the two-point hash discipline, the ownership receipt,

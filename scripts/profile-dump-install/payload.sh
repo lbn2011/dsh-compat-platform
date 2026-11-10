@@ -65,6 +65,11 @@ EXPECT_VERSION='2.9.1'
 NET_ENV=(/usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp)
 CURL_BIN=/usr/bin/curl
 PY_BIN=/usr/bin/python3
+# The example the copied package is asked to summarise, relative to the repository root, and the
+# summary schema it must report. Both are pinned so the step cannot pass by summarising something
+# else or by reporting a different shape.
+EXAMPLE_REL=/examples/diagnose/profile.yml
+EXPECT_SUMMARY_SCHEMA=profile-dump-summary/0.3-draft.1
 CURL_MAX_TIME=60
 CURL_CONNECT=10
 MAX_TGZ_BYTES=2097152           # 2 MiB: the pinned archive is far smaller
@@ -414,8 +419,81 @@ PY
     "$tgz_sha256" "$tgz_bytes" "$sha512_ok" "$TARGET" || :
   [ "$version" = "$EXPECT_VERSION" ] || { refuse 72 "installed version '$version' != expected '$EXPECT_VERSION'"; return 72; }
 
+  # ---- the default layout, under this prefix ---------------------------------
+  # Everything above proves the ARCHIVE extracts and matches its manifest. It does not prove the
+  # LAYOUT works: a consumer only ever sees <prefix>/node_modules/<package> sitting beside its
+  # dependencies. So copy this package (its src and manifest, never a node_modules) next to the
+  # freshly installed yaml and run the copied CLI from there. Module resolution walks up from the
+  # copy, so `import 'yaml'` can only find the tree this run installed — and the resolved path is
+  # recorded, so "it used the installed one" is a measurement rather than an inference.
+  say 'payload: starting the default-layout use step'
   br_evidence_gate || return 73
-  say "payload: verdict=installed version=$version files=$manifest_files sha512=$sha512_ok manifest_verify=$manifest_verify_rc"
+  local LAYOUT="$RUN/layout"
+  local LAYOUT_MODULES="$LAYOUT/node_modules"
+  local LAYOUT_PKG="$LAYOUT_MODULES/dsh-compat-platform"
+  rm -rf "$LAYOUT"
+  mkdir -p "$LAYOUT_PKG" || { refuse 73 "cannot create $LAYOUT_PKG"; return 73; }
+  cp -a "$PKG/package.json" "$LAYOUT_PKG/" 2>>"$RUN/layout-copy.err" || :
+  cp -a "$PKG/src" "$LAYOUT_PKG/" 2>>"$RUN/layout-copy.err" || :
+  ln -s "$NM/yaml" "$LAYOUT_MODULES/yaml" 2>>"$RUN/layout-copy.err" || :
+  br_record "$RUN/layout.txt" 'layout=%s\nlayout_package=%s\nlayout_yaml=%s\nlayout_node_modules_copy=false\n' \
+    "$LAYOUT" "$LAYOUT_PKG" "$LAYOUT_MODULES/yaml" || :
+
+  local resolve_rc=1
+  bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
+    --bind "$LAYOUT" "$LAYOUT" --bind "$RUN" "$RUN" \
+    --unshare-net --unshare-pid --unshare-ipc --unshare-uts --die-with-parent \
+    --chdir "$LAYOUT_PKG" \
+    -- /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp \
+       "$NODE" --input-type=module -e '
+         const { createRequire } = await import("node:module");
+         const require = createRequire(process.argv[1] + "/src/profile-dump.js");
+         console.log(require.resolve("yaml"));
+       ' "$LAYOUT_PKG" > "$RUN/layout-yaml-resolved.txt" 2> "$RUN/layout-yaml-resolved.err"
+  resolve_rc=$?
+  br_record "$RUN/layout-resolve.rc" 'resolve_rc=%s\n' "$resolve_rc" || :
+  local resolved_yaml
+  resolved_yaml=$(cat "$RUN/layout-yaml-resolved.txt" 2>/dev/null || true)
+  br_record "$RUN/layout-yaml-resolved-final.txt" 'resolved=%s\n' "$resolved_yaml" || :
+  if [ "$resolve_rc" -ne 0 ]; then
+    say "payload: the copied package could not resolve yaml (rc=$resolve_rc); verdict=failed"
+    return 72
+  fi
+  # `$LAYOUT/node_modules/yaml` is a symlink onto the installed tree, and Node reports the real
+  # path, so the resolved location is expected under $NM. Accept either the prefix itself or the
+  # installed tree it points at; anything else means the copy found some OTHER yaml (the checkout's,
+  # for instance) and this step proved nothing.
+  case "$resolved_yaml" in
+    "$LAYOUT"/*|"$NM"/*) : ;;
+    *) say "payload: yaml resolved OUTSIDE the independent prefix ($resolved_yaml); verdict=failed"
+       return 72 ;;
+  esac
+
+  local use_rc=1
+  bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
+    --bind "$LAYOUT" "$LAYOUT" --bind "$RUN" "$RUN" \
+    --unshare-net --unshare-pid --unshare-ipc --unshare-uts --die-with-parent \
+    --chdir "$RUN" \
+    -- /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp NODE_OPTIONS=--max-old-space-size=192 \
+       "$NODE" "$LAYOUT_PKG/src/profile-dump-cli.js" "$REPO$EXAMPLE_REL" \
+    > "$RUN/layout-use.stdout.json" 2> "$RUN/layout-use.stderr.txt"
+  use_rc=$?
+  br_record "$RUN/layout-use.rc" 'use_rc=%s\n' "$use_rc" || :
+  if [ "$use_rc" -ne 0 ]; then
+    cat "$RUN/layout-use.stderr.txt" 2>/dev/null || br_write_failure layout-use-stderr
+    say "payload: the copied package did not run against the example (rc=$use_rc); verdict=failed"
+    return 72
+  fi
+  local use_schema
+  use_schema=$("$NODE" -e 'const fs=require("fs");try{const d=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(String(d.profileDumpSummary||""))}catch{process.stdout.write("")}' "$RUN/layout-use.stdout.json" 2>/dev/null || true)
+  br_record "$RUN/layout-use-summary.txt" 'schema=%s\nexpected_schema=%s\n' "$use_schema" "$EXPECT_SUMMARY_SCHEMA" || :
+  [ "$use_schema" = "$EXPECT_SUMMARY_SCHEMA" ] || {
+    say "payload: the copied package reported schema '$use_schema', expected '$EXPECT_SUMMARY_SCHEMA'; verdict=failed"
+    return 72
+  }
+
+  br_evidence_gate || return 73
+  say "payload: verdict=installed version=$version files=$manifest_files sha512=$sha512_ok manifest_verify=$manifest_verify_rc layout=used schema=$use_schema"
   return 0
 }
 
