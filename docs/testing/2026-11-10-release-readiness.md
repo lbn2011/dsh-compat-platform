@@ -137,7 +137,14 @@ acc370f12689a9f5a55e7fb6bd10bd973477f5e8031f7ef88addf83d5e31f811  dsh-compat-dia
    round 2's tarballs, outside the envelope; it reads files that already exist and installs
    nothing. It is evidence for the standard split, not a bounded round.
 4. Local `node --test` runs (analyzer 448/448, host 16/16, runtime 32/32, repair 42/42, spec
-   105/105) preceded the rounds; they are sanity checks outside any envelope.
+   105/105) preceded the rounds; they are sanity checks outside any envelope. The spec suite was
+   then re-run **inside** its own envelope after the version bump, because its package-identity
+   test asserted the old version:
+   `20261110T135634Z-spec-test-batch-1403086-12330` — `acceptance_exit=0`, `# tests 105 /
+   # pass 105 / # fail 0`, `memory_peak=39161856` B, `pids_peak=16`, `terminal_ok=yes`,
+   `hash_rc=0`, `write_failures=0`. An earlier invocation returned `77` because it was started
+   by a relative path; the core refuses a relative entry rather than guessing, which is the
+   behaviour it is supposed to have.
 5. `scripts/package-install/run.sh` grew from 21 to 23 selected inputs (config-check manifest
    and README, plus `LICENSE`).
 
