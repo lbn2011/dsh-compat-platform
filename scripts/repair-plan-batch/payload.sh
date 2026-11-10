@@ -63,10 +63,12 @@ try {
 }
 say('manifest_parse=pass');
 say(`name_exact=${manifest.name === 'dsh-compat-repair' ? 'pass' : 'fail'}`);
-say(`private=${manifest.private === true ? 'pass' : 'fail'}`);
+say(`private_absent=${manifest.private === undefined ? 'pass' : 'fail'}`);
 say(`type_module=${manifest.type === 'module' ? 'pass' : 'fail'}`);
 if (manifest.name !== 'dsh-compat-repair') fail.push('name');
-if (manifest.private !== true) fail.push('private');
+// `private` was cleared on 2026-11-10; a manifest that sets it again would block the
+// publish this repository is preparing for, so the assertion is now the opposite one.
+if (manifest.private !== undefined) fail.push('private');
 if (manifest.type !== 'module') fail.push('type');
 for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
   const names = Object.keys(manifest[field] ?? {});

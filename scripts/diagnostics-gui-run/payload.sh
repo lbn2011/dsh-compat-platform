@@ -187,7 +187,7 @@ function check(id, ok, detail) {
 
 const manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'));
 check('name', manifest.name === 'dsh-compat-diagnostics-ui', manifest.name);
-check('private', manifest.private === true, String(manifest.private));
+check('private-absent', manifest.private === undefined, String(manifest.private));
 check('type-module', manifest.type === 'module', manifest.type);
 // The page must ship without a build step and without borrowing a build chain.
 for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {

@@ -70,9 +70,11 @@ let manifest;
 try { manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')); }
 catch (error) { say('manifest_parse=fail'); process.exit(1); }
 say('manifest_parse=pass');
-const isPrivate = manifest.private === true;
-say(`package_private=${isPrivate ? 'pass' : 'fail'}`);
-if (!isPrivate) fail.push('private');
+// `private` was cleared on 2026-11-10 (decision recorded in docs/testing/2026-11-10-publishable.md),
+// so the assertion is now that it is absent rather than that it is set.
+const privateAbsent = manifest.private === undefined;
+say(`package_private_absent=${privateAbsent ? 'pass' : 'fail'}`);
+if (!privateAbsent) fail.push('private');
 const isModule = manifest.type === 'module';
 say(`package_type_module=${isModule ? 'pass' : 'fail'}`);
 if (!isModule) fail.push('type-module');

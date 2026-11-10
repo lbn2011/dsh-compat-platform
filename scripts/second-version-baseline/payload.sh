@@ -56,7 +56,7 @@ second_version_payload() {
     const repo = process.env.REPO_DIR;
     const failures = [];
     const pkg = JSON.parse(readFileSync(join(repo, "packages/runtime/package.json"), "utf8"));
-    if (pkg.private !== true) failures.push("runtime:not-private");
+    if (pkg.private !== undefined) failures.push("runtime:private-set");
     if (Object.keys(pkg.dependencies ?? {}).length !== 0) failures.push("runtime:has-dependencies");
     const receipt = readFileSync(join(repo, "scripts/runtime-receipt/receipt.mjs"), "utf8");
     if (!receipt.includes("receiptVersion")) failures.push("receipt:no-version-field");

@@ -9,7 +9,9 @@ const depsMatch = (value) => value && Object.keys(value).length === 2 &&
 const [major, minor] = process.versions.node.split('.').map(Number);
 if (major < 24 || (major === 24 && minor < 9)) fail('Node >=24.9.0 required');
 if (mode === 'manifest') {
-  if (doc.name !== '@dsh-compat/config-check' || doc.private !== true || doc.type !== 'module' ||
+  // `private` was cleared on 2026-11-10 (docs/testing/2026-11-10-publishable.md), so the
+  // contract now requires that the field is absent instead of set.
+  if (doc.name !== '@dsh-compat/config-check' || doc.private !== undefined || doc.type !== 'module' ||
       doc.engines?.node !== '>=24.9.0' || !depsMatch(doc.dependencies)) fail('manifest contract mismatch');
   for (const key of ['scripts', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'workspaces', 'overrides']) {
     if (key in doc) fail(`unexpected manifest field: ${key}`);

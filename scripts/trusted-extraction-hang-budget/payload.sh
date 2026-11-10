@@ -83,7 +83,7 @@ if (!(b.outerSeconds > b.phaseSeconds + b.killGraceSeconds + b.readbackSeconds))
 if (pol.checkBudget(b) !== null) problems.push('checkBudget')
 const pkg = JSON.parse(readFileSync('$PKG/package.json', 'utf8'))
 if (pkg.name !== 'dsh-compat-trusted-extraction') problems.push('name')
-if (pkg.private !== true) problems.push('private')
+if (pkg.private !== undefined) problems.push('private:' + String(pkg.private))
 process.stdout.write(problems.length === 0 ? 'static-contract=pass\nshipped_phase_seconds=' + String(b.phaseSeconds) + '\n' : 'static-contract=FAIL:' + problems.join(',') + '\n')
 process.exit(problems.length === 0 ? 0 : 1)
 " > "$RUN/static-contract.txt" 2>&1 || { refuse 70 "static_contract"; return 70; }
