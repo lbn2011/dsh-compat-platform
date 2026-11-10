@@ -1,6 +1,6 @@
 {
   "name": "dsh-compat-repair",
-  "version": "0.0.0-draft.1",
+  "version": "0.1.0-draft.1",
   "private": true,
   "type": "module",
   "description": "Typed repair plans, a preview that never writes, and an apply confined to one fixture directory.",
@@ -23,5 +23,10 @@
   },
   "scripts": {
     "test": "node --test --test-concurrency=1 \"tests/*.test.js\""
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lbn2011/dsh-compat-platform.git"
   }
 }

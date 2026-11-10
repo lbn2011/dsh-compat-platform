@@ -1,6 +1,6 @@
 {
   "name": "dsh-compat-platform",
-  "version": "0.0.0",
+  "version": "0.1.0-draft.1",
   "private": true,
   "type": "module",
   "description": "Static declaration analysis without executing analyzed plugins. Pure library plus CLI with an explicitly selected trusted validator.",
@@ -70,5 +70,10 @@
   },
   "dependencies": {
     "yaml": "2.9.1"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lbn2011/dsh-compat-platform.git"
   }
 }

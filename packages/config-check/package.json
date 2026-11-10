@@ -1,6 +1,6 @@
 {
   "name": "@dsh-compat/config-check",
-  "version": "0.0.0-prepared",
+  "version": "0.1.0-draft.1",
   "private": true,
   "type": "module",
   "description": "Configuration contract checking for the DSH compatibility protocol: a JSON Schema 2020-12 instance check over an acquired, unpatched engine, with explicit not-checked outcomes.",
@@ -33,5 +33,10 @@
   },
   "scripts": {
     "test": "node --test --test-concurrency=1 \"tests/*.test.js\""
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lbn2011/dsh-compat-platform.git"
   }
 }

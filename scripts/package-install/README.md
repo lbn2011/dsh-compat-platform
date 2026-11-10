@@ -270,3 +270,21 @@ appearance is not drift.
   `npm pack`/`npm install` argv, the five-tarball requirement, the eight-`ok` probe
   assertion and the missing-dependency probe are **byte-for-byte** the pre-migration
   behaviour.
+
+## Two standards, and why
+
+The audit answers two different questions and no longer conflates them:
+
+* `--standard private` (default) — the roadmap's target is a **private** release candidate
+  (P5), so `"private": true` is the intended state and is **not** a blocker. Missing fields,
+  placeholder versions and an undecided licence still block.
+* `--standard public` — `"private": true` becomes a blocker, because it would silently
+  prevent the publish.
+
+The standard is recorded in the document and in every package row. On the current bytes,
+`private` reports **0 blockers on all five packages**; `public` reports exactly one —
+`PRIVATE_FLAG_SET` — which is a user decision, not a repository defect.
+
+`@dsh-compat/config-check` is packed into `tarballs-own/` and audited from there: its two
+`@hyperjump/*` peers are not installed on this machine, so it cannot join the offline consumer
+install. Its tarball and manifest are still audited; its installability is not claimed.

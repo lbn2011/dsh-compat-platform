@@ -98,10 +98,13 @@ const fail = [];
 const say = (line) => process.stdout.write(`${line}\n`);
 
 const expected = {
-  analyzer: { name: 'dsh-compat-platform', version: '0.0.0' },
-  host: { name: 'dsh-compat-diagnostics-ui', version: '0.0.0-draft.1' },
-  runtime: { name: 'dsh-compat-trusted-extraction', version: '0.0.0-draft.1' },
-  repair: { name: 'dsh-compat-repair', version: '0.0.0-draft.1' },
+  analyzer: { name: 'dsh-compat-platform', version: '0.1.0-draft.1' },
+  host: { name: 'dsh-compat-diagnostics-ui', version: '0.1.0-draft.1' },
+  runtime: { name: 'dsh-compat-trusted-extraction', version: '0.1.0-draft.1' },
+  repair: { name: 'dsh-compat-repair', version: '0.1.0-draft.1' },
+  // Audited for its manifest and tarball only: its two peers are not installed on
+  // this machine, so it cannot join the offline consumer install.
+  'config-check': { name: '@dsh-compat/config-check', version: '0.1.0-draft.1' },
 };
 
 for (const [dir, want] of Object.entries(expected)) {
@@ -125,6 +128,14 @@ for (const [dir, want] of Object.entries(expected)) {
   const deps = Object.keys(manifest.dependencies ?? {});
   if (dir === 'analyzer') {
     const ok = deps.length === 1 && deps[0] === 'yaml' && manifest.dependencies.yaml === '2.9.1';
+    say(`deps_${dir}=${ok ? 'pass' : 'fail'}:${deps.join(',')}`);
+    if (!ok) fail.push(`deps:${dir}`);
+  } else if (dir === 'config-check') {
+    // The one package with third-party peers. Exact pins only: a range would let a
+    // different engine version in without a new lock review.
+    const want = { '@hyperjump/browser': '1.6.0', '@hyperjump/json-schema': '1.18.0' };
+    const ok = deps.length === 2
+      && deps.every((name) => manifest.dependencies[name] === want[name]);
     say(`deps_${dir}=${ok ? 'pass' : 'fail'}:${deps.join(',')}`);
     if (!ok) fail.push(`deps:${dir}`);
   } else {
@@ -159,6 +170,12 @@ for (const [dir, want] of Object.entries(expected)) {
       if (!ok) fail.push(`target:${dir}${key}${suffix}`);
     }
   }
+  say(`license_${dir}=${manifest.license === 'MIT' ? 'pass' : 'fail'}:${manifest.license ?? '(unset)'}`);
+  if (manifest.license !== 'MIT') fail.push(`license:${dir}`);
+  const repoUrl = manifest.repository && manifest.repository.url;
+  const repoOk = typeof repoUrl === 'string' && repoUrl.includes('github.com/lbn2011/');
+  say(`repository_${dir}=${repoOk ? 'pass' : 'fail'}`);
+  if (!repoOk) fail.push(`repository:${dir}`);
   const files = manifest.files;
   if (!Array.isArray(files) || files.length === 0) {
     say(`files_${dir}=missing`);
@@ -196,16 +213,17 @@ CONTRACT
   # registry: --offline is passed and a missing tarball is a failure, not a download.
   local ART=$RUN/artifacts
   local NPMHOME=$RUN/npmhome
-  mkdir -p "$ART" "$NPMHOME" "$NPMHOME/cache" || { refuse 73 "cannot create pack directories"; return 73; }
-  pack_one() { # dir label
-    local dir=$1 label=$2
+  local ART_OWN=$RUN/tarballs-own
+  mkdir -p "$ART" "$ART_OWN" "$NPMHOME" "$NPMHOME/cache" || { refuse 73 "cannot create pack directories"; return 73; }
+  pack_one() { # dir label [destination]
+    local dir=$1 label=$2 dest=${3:-$ART}
     bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
-      --bind "$ART" "$ART" --bind "$NPMHOME" "$NPMHOME" \
+      --bind "$ART" "$ART" --bind "$ART_OWN" "$ART_OWN" --bind "$NPMHOME" "$NPMHOME" \
       --unshare-pid --unshare-net --unshare-ipc --unshare-uts --die-with-parent \
       --chdir "$REPO/packages/$dir" \
       -- /usr/bin/env -i PATH=/usr/bin:/bin:/www/server/nodejs/v24.21.0/bin \
          HOME="$NPMHOME" TMPDIR=/tmp \
-         "$NPM" pack --offline --cache "$NPMHOME/cache" --pack-destination "$ART" \
+         "$NPM" pack --offline --cache "$NPMHOME/cache" --pack-destination "$dest" \
       > "$RUN/pack-$label.out" 2> "$RUN/pack-$label.err"
     printf '%s\n' "$?" > "$RUN/pack-$label.rc"
     return 0
@@ -214,6 +232,11 @@ CONTRACT
   pack_one host host
   pack_one runtime runtime
   pack_one repair repair
+  # config-check is packed for AUDIT ONLY, into its own directory: its two peers
+  # (@hyperjump/*) are not installed on this machine, so it cannot join the offline
+  # consumer install. Auditing its tarball still answers "does it ship only what its
+  # files list implies, and is its manifest ready" — which is the question here.
+  pack_one config-check config-check-own "$ART_OWN" || true
   # The one dependency, packed from the copy the analyzer already resolved.
   bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
     --bind "$ART" "$ART" --bind "$NPMHOME" "$NPMHOME" \
@@ -234,6 +257,11 @@ CONTRACT
   local count
   count=$(wc -l < "$RUN/tarballs.txt" 2>/dev/null || printf 0)
   [ "$count" -eq 5 ] || pack_bad="$pack_bad tarballs=$count"
+  # config-check is packed separately and must also succeed, or its audit would read
+  # a stale tarball from an earlier run.
+  local own_rc
+  own_rc=$(cat "$RUN/pack-config-check-own.rc" 2>/dev/null || printf '?')
+  [ "$own_rc" = 0 ] || pack_bad="$pack_bad config-check(rc=$own_rc)"
   br_record "$RUN/pack-verdict.txt" 'pack_failures=%s\ntarballs=%s\n' "${pack_bad:-none}" "$count" || :
   [ -z "$pack_bad" ] || { refuse 72 "packing failed:$pack_bad"; return 72; }
 
@@ -258,7 +286,7 @@ CONTRACT
   # wrong in the tarball would pass every earlier step.
   br_evidence_gate || { refuse 73 "evidence write failed before publish audit"; return 73; }
   local audit_rc=1
-  "$PYTHON" -I "$SLICE/publish_audit.py" --artifacts "$ART" --repo "$REPO" \
+  "$PYTHON" -I "$SLICE/publish_audit.py" --artifacts "$ART" --artifacts "$ART_OWN" --repo "$REPO" \
     --out "$RUN/publish-readiness.json" > "$RUN/publish-readiness.txt" 2> "$RUN/publish-readiness.err"
   audit_rc=$?
   br_record "$RUN/publish-audit.rc" 'publish_audit_rc=%s\n' "$audit_rc" || :
