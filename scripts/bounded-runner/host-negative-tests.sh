@@ -123,10 +123,23 @@ same_argv() {
   for arg in "$@"; do [ "$arg" = "${want[$i]}" ] || return 1; i=$((i + 1)); done
 }
 systemd-run() {
+  # The declared setenv channel is placed after --working-directory and before
+  # `--`, exactly where host.sh puts it; the mock mirrors that order so a
+  # misplaced or unvalidated entry cannot pass.
+  local -a setenv_argv=()
+  if [ "${BR_SETENV+x}" = x ] && [ "${#BR_SETENV[@]}" -gt 0 ]; then
+    local setenv_entry
+    for setenv_entry in "${BR_SETENV[@]}"; do
+      case "$setenv_entry" in
+        --setenv=[A-Za-z_][A-Za-z0-9_]*=?*) setenv_argv+=("$setenv_entry") ;;
+      esac
+    done
+  fi
   local -a expected=(--wait --pipe --collect --unit="$BR_UNIT"
     --property=Type=exec --property=MemoryMax=384M --property=MemorySwapMax=0
     --property=TasksMax=32 --property=CPUQuota=50% --property=RuntimeMaxSec=120
-    --working-directory="${PAYLOAD%/*}" -- /bin/bash "$PAYLOAD" "$BR_UNIT" "$BR_RUN")
+    --working-directory="${PAYLOAD%/*}" "${setenv_argv[@]}"
+    -- /bin/bash "$PAYLOAD" "$BR_UNIT" "$BR_RUN")
   same_argv expected "$@" || { denied systemd-run "$@"; return 99; }
   printf 'launch\n' >> "$EVENTS"
   # The payload is NEVER executed; its receipt/evidence are explicit fixtures.
@@ -273,6 +286,55 @@ for scenario in success foreign-refusal lock-contention journal-failure diff-ope
     special60) expected=60;;
   esac
   check "full first-call scenario $scenario" host_case "$scenario" "$expected"
+done
+# The declared setenv channel (added 2026-11-10) is the newest core surface and
+# had no mock coverage until here. One accepted case proves the values reach the
+# manager argv and are recorded; three rejected cases prove the channel is
+# validated before any launch, including an empty value and a non-flag entry.
+setenv_case() (
+  SCENARIO=$1 expected=$2
+  checks=0 failures=0
+  CASE_ROOT="$SCRATCH/$SCENARIO"
+  mkdir -- "$CASE_ROOT" || exit 73
+  EVENTS="$CASE_ROOT/events"; : > "$EVENTS"
+  SELECTED="$CASE_ROOT/input"; printf 'before\n' > "$SELECTED"
+  BR_SELECTED_INPUTS=("$SELECTED")
+  BR_HOST_USED=no BR_LAUNCHED=no BR_WRITE_FAILURES=0
+  case "$SCENARIO" in
+    setenv-accepted) BR_SETENV=("--setenv=MOCK_CHANNEL=scratch-value" "--setenv=SECOND_CHANNEL=second-value") ;;
+    setenv-rejected-name) BR_SETENV=("--setenv=1BAD=x") ;;
+    setenv-rejected-shape) BR_SETENV=("MOCK_CHANNEL=x") ;;
+    *) BR_SETENV=("--setenv=MOCK_CHANNEL=") ;;
+  esac
+  br_host_run "$CORE" "$WRAPPER" "$PAYLOAD" "$CASE_ROOT/runs" correspondence
+  actual=$?
+  check "$SCENARIO return rc=$actual expected=$expected" test "$actual" = "$expected"
+  check "$SCENARIO consumed first call" test "$BR_HOST_USED" = yes
+  [ "$expected" = 0 ] || launches=0
+  [ "$expected" = 0 ] && launches=1
+  check "$SCENARIO exact launch count=$launches" test "$(count_event launch)" = "$launches"
+  check "$SCENARIO no stop" test "$(count_event stop)" = 0
+  check "$SCENARIO fail-closed dispatch remained clean" no_denied
+  if [ "$launches" = 1 ]; then
+    check "$SCENARIO setenv recorded verbatim" test "$("$REAL_CAT" -- "$BR_RUN/setenv.txt")" = "$(printf '%s\n' "--setenv=MOCK_CHANNEL=scratch-value" "--setenv=SECOND_CHANNEL=second-value")"
+    argv_text=$("$REAL_CAT" -- "$BR_RUN/argv.txt")
+    case "$argv_text" in
+      *--setenv=MOCK_CHANNEL=scratch-value*) argv_ok=yes;;
+      *) argv_ok=no;;
+    esac
+    check "$SCENARIO argv.txt carries the declared value" test "$argv_ok" = yes
+    check "$SCENARIO completed whole host path" test -s "$BR_RUN/status.txt"
+  else
+    check "$SCENARIO refusal happened before any status evidence" test ! -e "$BR_RUN/status.txt"
+    check "$SCENARIO refusal never recorded setenv" test ! -e "$BR_RUN/setenv.txt"
+  fi
+  printf '# scenario=%s checks=%s failures=%s\n' "$SCENARIO" "$checks" "$failures"
+  [ "$failures" = 0 ]
+)
+for scenario in setenv-accepted setenv-rejected-name setenv-rejected-shape setenv-rejected-empty; do
+  expected=0
+  [ "$scenario" = setenv-accepted ] || expected=70
+  check "declared setenv scenario $scenario" setenv_case "$scenario" "$expected"
 done
 # Known audit gap in reviewed source: br_terminal requires InvocationID/receipt
 # before accepting br_settled. The collected case deliberately expects success,

@@ -14,7 +14,14 @@ never enters their envelopes.
    `boot()` and reads each entry's final `fiber.state`
    (`src/trusted-extraction-adapter.js`).
 3. Distinguishes an import failure from an activation failure by re-importing the failed
-   entry's module inside the sandbox — disclosed as `FAILURE_PHASE_READ_BY_REIMPORT`.
+   entry's module inside the sandbox — disclosed as `FAILURE_PHASE_READ_BY_REIMPORT`. This is
+   the same mechanism the host's own `inactiveEntries(ctx, importNow = true)` uses. It does not
+   re-run the module: an ECMAScript module is evaluated at most once per resolved URL, and a
+   module that threw during evaluation is cached in its errored state and rethrows the same error
+   object. `tests/reimport-cache.test.js` measures all three facts (same namespace, same error
+   object, side-effect file written once) instead of assuming them, so the limitation code
+   records a residual dependency on the runtime's module cache rather than an observed side
+   effect.
 4. Writes a receipt (`src/trusted-extraction-receipt.js`, `src/trusted-extraction-supervisor.js`)
    with `certification: false`, `correlation: 'not-established'`, a fixed `notDerived` list and
    a fixed ten-code `limitations` list.
@@ -33,10 +40,12 @@ never enters their envelopes.
 ## Tests
 
 ```bash
-node --test --test-concurrency=1 "tests/*.test.js"     # 29 pure tests
+node --test --test-concurrency=1 "tests/*.test.js"     # 32 pure tests
 ```
 
 The bounded observation runs through `scripts/trusted-extraction-batch/`; see
 `docs/testing/2026-11-09-trusted-extraction.md` for the first measured rounds and
 `docs/testing/2026-11-09-trusted-extraction-failure-paths.md` for the kill path and the observed
-network refusal.
+network refusal. The shipped 80 s phase budget (rather than a reduced demo budget) is exercised
+by `scripts/trusted-extraction-hang-budget/`, recorded in
+`docs/testing/2026-11-10-shipped-phase-budget.md`.

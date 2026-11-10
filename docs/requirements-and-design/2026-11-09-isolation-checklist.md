@@ -1,6 +1,6 @@
 # Isolation checklist for the trusted-extraction path
 
-> Date: 2026-11-09 · Status: **all five gates demonstrated in bounded rounds; gate 4's kill path ran with a reduced demo budget.** Companion to
+> Date: 2026-11-09 (gate 4 status revised 2026-11-10) · Status: **all five gates demonstrated in bounded rounds, and gate 4's kill path is measured at the shipped 80 s phase budget.** Companion to
 > [the trusted-extraction design](2026-11-09-trusted-extraction-design.md) §4.3.
 >
 > Purpose: turn the five gates in the design into checks that either pass with recorded
@@ -107,10 +107,19 @@ each phase deadline expires strictly earlier.
 **Refusal.** Arithmetic mismatch, or a run that cannot confirm termination →
 `ISOLATION_BUDGET_INVALID` / `CLEANUP_UNCONFIRMED`.
 
-**Status.** Demonstrated 2026-11-09 (`docs/testing/2026-11-09-trusted-extraction-failure-paths.md`):
-the kill path ran with a **3 s** demo budget and produced `incomplete`/`unconfirmed`/`timedOut`
-with no surviving process. The arithmetic for the shipped 80 s budget (120 > 80 + 10 + 20) is still
-only asserted statically — the mechanism is proven, the shipped duration is not exercised.
+**Status.** Demonstrated twice on 2026-11-09/10. The mechanism was first shown with a **3 s**
+demo budget (`docs/testing/2026-11-09-trusted-extraction-failure-paths.md`); it is now
+**measured at the shipped 80 s phase budget** by a dedicated slice
+(`docs/testing/2026-11-10-shipped-phase-budget.md`): two bounded rounds, both
+`status: incomplete`, `cleanup: unconfirmed`, `process.timedOut: true`, `signal: SIGKILL`, with
+the executed budget read back as `phaseSeconds: 80` from the policy module rather than restated
+in the test. Wall clock per round was 81 s, so the 120 s outer limit was never reached. Item 3
+(terminal readback after the forced kill) holds in both rounds: `terminal_ok=yes`,
+`MainPID=0`, `confirmation=settled`.
+
+The arithmetic itself (120 > 80 + 10 + 20) is still asserted separately as a precondition — the
+two are complementary: the inequality would still hold if the kill logic were broken, which is
+why the measurement matters.
 
 ## 6. Gate 5 — Isolation acceptance with sentinels
 

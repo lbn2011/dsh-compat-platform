@@ -12,6 +12,19 @@
 > [the installer scratch record](2026-11-10-profile-dump-install-scratch.md). The
 > hashes quoted below describe the earlier bytes and are not retracted.
 
+> **Later change (2026-11-10, second).** `policy.sh` gained the `trusted-extraction-hang`
+> prefix and `trusted-extraction-hang-*` unit family (a new slice that measures the shipped 80 s
+> phase budget). `core.manifest` was refreshed to the new `policy.sh` digest
+> (`f68270f4…`), and the qualification suite was re-run on the new bytes:
+> `/data/dsh-ecosystem-test-artifacts/runs/20261110T105604Z-bounded-runner-qualification-1361578-19518`
+> — `acceptance_exit=0`, `launch_rc=0`, `terminal_ok=yes`, `hash_rc=0`, `failures=0`,
+> `automatic_stop=never`, negative suite `failures=0`, host-path `top_level_checks=22
+> failures=0`. The host count rose from 18 to 22 because the same run is the **first mock
+> coverage of the `--setenv` channel**: one accepted case (value reaches the manager argv and is
+> recorded verbatim) and three refusals (invalid name, non-flag entry, empty value) that never
+> launch a unit and never write `setenv.txt`. The `host.sh` digest is unchanged from the earlier
+> note (`08a12b13…`). Hashes quoted elsewhere in this record remain historical.
+
 > Date: 2026-11-10. **[Decided] Evidence scope:** the second preserved bootstrap run passed syntax checks and both Bash mock suites for the recorded input bytes. The first run failed before syntax checks or tests began and remains part of this record. This is **mock-only core qualification, not real core lifecycle qualification**, migration acceptance, or release approval.
 
 ## 1. Evidence and chronology
