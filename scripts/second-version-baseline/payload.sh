@@ -5,8 +5,9 @@
 # expose `boot`/`auditStartupEntries` at all? Both a "usable" and an "absent" answer are
 # results; only a broken step is a failure.
 #
-# Network: step 4 is the only step that contacts a registry, by design. Everything else
-# reads the prefix it produced. There is no retry: a fetch that fails fails the round.
+# Network: steps 4 and 6b contact the registry, by design, and 6b only to fetch the few
+# modules its receipt names. Everything else reads what they produced. There is no retry:
+# a fetch that fails fails the round.
 #
 # Exit codes: 0 green, 70 envelope/argument, 71 static contract, 72 a step failed,
 # 73 evidence write failed.
@@ -137,6 +138,124 @@ PY_EOF
   br_record "$RUN/baseline.txt" \
     'baseline_id=published-older\nrequested_version=%s\nappboot_dependency=%s\nreceipt_scope=release-manifest-and-interface-package-only\n' \
     "$VERSION" "$appboot_version" || :
+
+  # ------------------------------------------------------------ 6b. curated prefix receipt
+  # The release's 91 dependencies do not install inside 120 s (record:
+  # docs/testing/2026-11-10-second-version-baseline.md §2). This step therefore assembles
+  # only the modules the receipt names, each at the version the release itself declares,
+  # and asks the receipt what it can and cannot resolve there. It is NOT the release's
+  # tree: no transitive dependency is installed below, and every label says so.
+  mkdir -p "$RUN/prefix-tgz" "$RUN/prefix" || { refuse 73 "cannot create prefix directories"; return 73; }
+  MANIFEST="$RUN/release-manifest.json" WANT="$VERSION" "$NODE" --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    const raw = JSON.parse(readFileSync(process.env.MANIFEST, "utf8"));
+    // `npm view <name>@<version> --json` answers with a one-element array holding the
+    // packument; the dependency map lives on the version entry, with a top-level copy.
+    const entry = Array.isArray(raw) ? raw[0] : raw;
+    const versioned = entry?.versions?.[process.env.WANT];
+    const deps = versioned?.dependencies ?? entry?.dependencies ?? {};
+    const names = [
+      "@deepseek-ai/cordis", "cordis-plugin-loader", "cordis-plugin-include",
+      "cordis-plugin-group", "@deepseek-ai/dsh-app-boot", "@deepseek-ai/dsh-cmdline",
+      "@deepseek-ai/dsh-home-paths", "@deepseek-ai/dsh-official-bundles",
+    ];
+    // The release declares some plugins under the scope; accept either spelling.
+    const rangeFor = (n) => deps[n] ?? (n.startsWith("@") ? "" : deps["@deepseek-ai/" + n] ?? "");
+    const out = names.map((n) => `${n}\t${rangeFor(n)}`);
+    // The installation goes first: the other modules are nested inside it, and placing it
+    // afterwards would clear them with the destination reset.
+    out.unshift(`@deepseek-ai/dsh\t${process.env.WANT}`);
+    process.stdout.write(out.join("\n") + "\n");
+  ' > "$RUN/prefix-modules.txt" 2> "$RUN/prefix-modules.err" \
+    || { refuse 72 "payload: cannot read the declared module versions"; return 72; }
+  cat "$RUN/prefix-modules.txt" 2>/dev/null || br_write_failure prefix-modules
+
+  # These two records are accumulated, so truncate once and append inside the loop.
+  : > "$RUN/prefix-packed.txt" || br_write_failure prefix-packed
+  : > "$RUN/prefix-skipped.txt" || br_write_failure prefix-skipped
+  : > "$RUN/prefix-pack-failures.txt" || br_write_failure prefix-pack-failures
+  local name range out tgz dest prc
+  while IFS=$'\t' read -r name range; do
+    [ -n "$name" ] || continue
+    if [ -z "$range" ]; then
+      printf 'skipped=%s (not a declared dependency of this release)\n' "$name" >> "$RUN/prefix-skipped.txt" || br_write_failure prefix-skipped
+      continue
+    fi
+    # A name the registry does not publish under that spelling is a *measured* answer,
+    # not a broken step: try the scoped spelling too, and otherwise record the failure so
+    # the receipt's NOT_RESOLVED row has its reason next to it.
+    out=""
+    for spec in "$name@$range" "@deepseek-ai/$name@$range"; do
+      case "$name" in "@"*) [ "$spec" = "$name@$range" ] || continue ;; esac
+      if out=$("$NPM" pack "$spec" --pack-destination "$RUN/prefix-tgz" \
+        < /dev/null 2>> "$RUN/prefix-pack.err"); then
+        break
+      fi
+      out=""
+    done
+    if [ -z "$out" ]; then
+      printf 'pack_failed=%s (neither %s nor @deepseek-ai/%s answered for %s)\n' \
+        "$name" "$name" "$name" "$range" >> "$RUN/prefix-pack-failures.txt" \
+        || br_write_failure prefix-pack-failures
+      continue
+    fi
+    tgz=$(printf '%s\n' "$out" | tail -n 1)
+    # Extract to staging, then place the tree under its *published* name: the release
+    # declares some plugins unscoped while the registry publishes them under the scope,
+    # and the receipt resolves the scoped name.
+    staging="$RUN/prefix-staging/$name"
+    rm -rf "$staging" || { refuse 73 "cannot clear $staging"; return 73; }
+    mkdir -p "$staging" || { refuse 73 "cannot create $staging"; return 73; }
+    tar -xzf "$RUN/prefix-tgz/$tgz" -C "$staging" --strip-components=1 \
+      || { refuse 72 "payload: cannot extract $tgz"; return 72; }
+    published=$("$NODE" -e 'process.stdout.write(String(require(process.argv[1]).name ?? ""))' \
+      "$staging/package.json" 2>> "$RUN/prefix-pack.err")
+    [ -n "$published" ] || { refuse 72 "payload: $tgz carries no package name"; return 72; }
+    if [ "$published" = "@deepseek-ai/dsh" ]; then
+      dest="$RUN/prefix/node_modules/$published"
+    else
+      dest="$RUN/prefix/node_modules/@deepseek-ai/dsh/node_modules/$published"
+    fi
+    mkdir -p "${dest%/*}" || { refuse 73 "cannot create ${dest%/*}"; return 73; }
+    rm -rf "$dest" || { refuse 73 "cannot clear $dest"; return 73; }
+    mv "$staging" "$dest" || { refuse 72 "payload: cannot place $published"; return 72; }
+    printf '%s\t%s\t%s\n' "$name" "$published" "$tgz" >> "$RUN/prefix-packed.txt" \
+      || br_write_failure prefix-packed
+  done < "$RUN/prefix-modules.txt"
+
+  # The declared modules are placed under the installation's own node_modules, because
+  # the receipt refuses any entry that resolves outside the installation directory
+  # (ENTRY_OUTSIDE_INSTALLATION) — the same shape a real install has.
+  # The receipt names ten modules and reports, per module, whether it resolved. Exit 2
+  # (INCOMPLETE_RECEIPT) is a *measured answer* here, not a broken step: it is how
+  # "this release does not ship that module" gets recorded.
+  "$NODE" "$REPO/scripts/runtime-receipt/receipt.mjs" \
+    --installation "$RUN/prefix/node_modules/@deepseek-ai/dsh" \
+    > "$RUN/prefix-receipt.json" 2> "$RUN/prefix-receipt.err"
+  prc=$?
+  br_record "$RUN/prefix-receipt.rc" 'prefix_receipt_rc=%s\n' "$prc" || :
+  case "$prc" in
+    0|2) : ;;
+    *) refuse 72 "payload: prefix receipt failed (rc=$prc)"; return 72 ;;
+  esac
+  RECEIPT="$RUN/prefix-receipt.json" "$NODE" --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    const doc = JSON.parse(readFileSync(process.env.RECEIPT, "utf8"));
+    const rows = Array.isArray(doc.rows) ? doc.rows : [];
+    const unresolved = Array.isArray(doc.unresolved) ? doc.unresolved : [];
+    const lines = [
+      `rows=${rows.length}`,
+      `row_names=${rows.map((r) => r.module).join(",")}`,
+      `unresolved=${unresolved.length}`,
+      `unresolved_names=${unresolved.map((u) => u.module).join(",")}`,
+      `installation_version=${doc?.installation?.version ?? ""}`,
+      `installation_manifest_sha256=${doc?.installation?.manifestSha256 ?? ""}`,
+      `receipt_scope=curated-prefix-of-the-modules-the-receipt-names`,
+    ];
+    process.stdout.write(lines.join("\n") + "\n");
+  ' > "$RUN/prefix-summary.txt" 2> "$RUN/prefix-summary.err" \
+    || { refuse 73 "payload: cannot summarise the prefix receipt"; return 73; }
+  cat "$RUN/prefix-summary.txt" 2>/dev/null || br_write_failure prefix-summary
 
   # ------------------------------------------------------------ 7. verdict
   br_payload_finish 0

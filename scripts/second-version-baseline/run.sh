@@ -38,6 +38,7 @@ set -uo pipefail
   BR_WORKLOAD_EXITS=(0 70 71 72 73)
   BR_SELECTED_INPUTS=(
     "$SLICE/probe-release.mjs"
+    "$REPO/scripts/runtime-receipt/receipt.mjs"
     "$REPO/packages/runtime/package.json"
     "$REPO/packages/runtime/src/isolation-policy.js"
     "$REPO/packages/runtime/src/trusted-extraction-adapter.js"
