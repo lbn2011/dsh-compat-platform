@@ -93,18 +93,22 @@ was invoked by a relative path.
 3. Static contract: the package is `private`, has zero dependencies of any kind, every
    export target exists, the budget slack is positive, `FAILURE_PHASE_READ_BY_REIMPORT`
    is declared a limitation, and `NOT_DERIVED` holds exactly six entries.
-4. Unit tests (`29/29`): one `node --test --test-concurrency=1` run over
+4. Unit tests (`32/32`): one `node --test --test-concurrency=1` run over
    `packages/runtime/tests/*.test.js`. The summary is normalised, and then the core's
    singleton TAP check must pass on it.
 5. Isolation gates 1–5 in a bubblewrap sandbox, including one outbound attempt observed
    from **inside** the sandbox (`ENETUNREACH`), the sentinel probes, and the
    uid/capability readback.
-6. Fixture observation: five phases, four entry outcomes, and a receipt shape check.
-7. Failure paths: a fixture that outlives a **3 s demo phase budget** is killed and
+6. This baseline's runtime receipt: `scripts/runtime-receipt/receipt.mjs` runs against the
+   observed installation **inside the same unit**, so the receipt and the observation cannot
+   describe different runtimes. `baseline.txt` records the resolved version, the receipt
+   document's own sha256, and the official pin's commit/version marked as *declared*.
+7. Fixture observation: five phases, four entry outcomes, and a receipt shape check.
+8. Failure paths: a fixture that outlives a **3 s demo phase budget** is killed and
    reaped (`status: incomplete`, `cleanup: unconfirmed`, `timedOut: true`), and the
    network verdict is observed from inside the sandbox. The shipped 80 s budget is still
    covered only by the arithmetic check.
-8. yaml snapshot, then the verdict. The core records peaks and the payload receipt.
+9. yaml snapshot, then the verdict. The core records peaks and the payload receipt.
 
 ## The six failure-path checks (unchanged)
 
@@ -163,7 +167,8 @@ Canonical, written by the core: `selection.txt`, `control-before.txt`,
 
 Written by this payload: `tests.tap`, `tests.err`, `tests-exit.txt`,
 `tests-summary.txt`, `tests-normalized.tap`, `tests-fields.txt`,
-`static-contract.txt`, `isolation.txt`,
+`static-contract.txt`, `isolation.txt`, `runtime-receipt.json`, `runtime-receipt.err`,
+`runtime-receipt.rc`, `baseline.txt`,
 `fixture.json`, `fixture.err`, `fixture-exit.txt`, `failure-paths/report.txt`,
 `failure-paths.json`, `failure-paths-summary.txt`, `yaml.txt`, `verdict.txt`,
 `reason.txt` (first refusal only), plus per-gate files under `isolation/` and the raw
@@ -178,11 +183,13 @@ pre-migration shape of a refusal, written once, before the payload returns.
 
 ## Selected inputs (hashed before and after)
 
-The launcher names 15 files; the core hashes them twice and reports drift as `78`:
+The launcher names 16 files; the core hashes them twice and reports drift as `78`:
 `packages/runtime/package.json`, the five runtime sources
 (`isolation-policy.js`, `child-probe.js`, `trusted-extraction-adapter.js`,
 `trusted-extraction-receipt.js`, `trusted-extraction-supervisor.js`), the two test files,
-`failure-paths.mjs`, and the six `examples/trusted-extraction/` fixtures.
+`failure-paths.mjs`, the six `examples/trusted-extraction/` fixtures, and
+`scripts/runtime-receipt/receipt.mjs` (the receipt step's own script, hashed because a
+receipt produced by unhashed code would be unaccounted control).
 
 `run.sh` and `payload.sh` are **not** repeated there — they are control sources. The
 observed DSH installation
@@ -194,9 +201,9 @@ its bytes, and hashing a vendored installation would turn an upgrade into a fals
 
 No production profile is read, no real plugin is loaded, no network is used. A green
 round means the fixture behaved as designed inside the boundary; it is not a
-loadability, correlation or certification result. The kill path is demonstrated at a
-3 s demo budget; the shipped 80 s budget is covered by arithmetic, not by a 80 s
-observation.
+loadability, correlation or certification result. The kill path is demonstrated here at
+a 3 s demo budget; the shipped 80 s budget is measured by the separate
+`scripts/trusted-extraction-hang-budget` slice, not by this batch.
 
 ## Changes in this migration (for the reviewer)
 

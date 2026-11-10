@@ -92,6 +92,7 @@ set -uo pipefail
     "$REPO/packages/runtime/tests/isolation-policy.test.js"
     "$REPO/packages/runtime/tests/trusted-extraction-receipt.test.js"
     "$SLICE/failure-paths.mjs"
+    "$REPO/scripts/runtime-receipt/receipt.mjs"
     "$REPO/examples/trusted-extraction/config.yml"
     "$REPO/examples/trusted-extraction/plugin-ok.mjs"
     "$REPO/examples/trusted-extraction/plugin-import-throw.mjs"

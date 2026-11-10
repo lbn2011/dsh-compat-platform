@@ -1,9 +1,10 @@
 #!/bin/bash
 # Payload for one bounded trusted-extraction observation round.
 #
-# SOURCE-ONLY migration to the canonical bounded runner (ABI bounded-runner/1,
-# core commit c8123de). Awaiting Lead bounded verification. These bytes have not
-# been executed, syntax-qualified, sourced or launched.
+# Migrated to the canonical bounded runner (ABI bounded-runner/1, core commit
+# c8123de, policy digest f68270f4). Executed in bounded rounds, most recently on
+# 2026-11-10 (four green rounds; see docs/testing/2026-11-09-trusted-extraction.md,
+# ...-failure-paths.md and ...-second-baseline.md).
 #
 # THIS IS AN UPLIFT, NOT AN EQUIVALENCE REFACTOR. The workload — configure the
 # supervisor, sandbox a child as uid 65534, probe sentinels, observe the network
@@ -61,8 +62,8 @@ refuse() { # code reason; keeps the pre-migration reason.txt artefact
   return "$1"
 }
 say() { printf '%s\n' "$*"; }
-# The node spec reporter prints `ℹ tests 29`; the core's TAP policy reads
-# singleton `# tests 29` comments. Bodies are rewritten only when the whole line
+# The node spec reporter prints `ℹ tests <n>`; the core's TAP policy reads
+# singleton `# tests <n>` comments. Bodies are rewritten only when the whole line
 # is `<key> <decimal>`, so arbitrary test output cannot invent a summary line.
 normalize_tap() { # source destination
   LC_ALL=C awk '
@@ -175,6 +176,29 @@ process.exit(r.gates.refusal === null ? 0 : 1)
   local iso=$?
   printf 'isolation_exit=%s\n' "$iso" >> "$RUN/isolation.txt"
   [ "$iso" -eq 0 ] || { refuse 73 "isolation_gates"; return 73; }
+
+  # ------------------------------------------------------------ 4b. this baseline's receipt
+  # The matrix needs the identity of the runtime an observation actually ran on: which modules,
+  # which versions, which bytes. The receipt is produced here, inside this unit, so the two
+  # artifacts (receipt and observation) belong to the same launch rather than being gathered
+  # separately and assumed to agree.
+  local receipt_rc=1
+  "$NODE" "$REPO/scripts/runtime-receipt/receipt.mjs" --installation "$INSTALLATION" \
+    > "$RUN/runtime-receipt.json" 2> "$RUN/runtime-receipt.err"
+  receipt_rc=$?
+  br_record "$RUN/runtime-receipt.rc" 'receipt_rc=%s\n' "$receipt_rc" || :
+  [ "$receipt_rc" -eq 0 ] || { cat "$RUN/runtime-receipt.err" 2>/dev/null || br_write_failure receipt-stderr; refuse 72 "runtime receipt"; return 72; }
+  local receipt_digest installed_version
+  # The receipt document names the bytes; its own sha256 is what a later reader can re-check.
+  receipt_digest=$(sha256sum "$RUN/runtime-receipt.json" 2>/dev/null | cut -d' ' -f1 || true)
+  installed_version=$("$NODE" -e '
+    const fs = require("fs");
+    const doc = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    process.stdout.write(String(doc?.installation?.version || ""));
+  ' "$RUN/runtime-receipt.json" 2>/dev/null || true)
+  br_record "$RUN/baseline.txt" 'baseline_id=installed-rc\ninstalled_version=%s\nreceipt_digest=%s\nofficial_baseline_commit=ce7073d51254c26cd63b22a60835b8f948deb447\nofficial_baseline_version=0.2.2-alpha.2\nreceipt_scope=process-and-bytes-of-this-installation-only\n' \
+    "$installed_version" "$receipt_digest" || :
+  say "payload: baseline version=$installed_version receipt=$receipt_digest"
 
   # ------------------------------------------------------------ 5. fixture observation
   "$NODE" --input-type=module -e "
