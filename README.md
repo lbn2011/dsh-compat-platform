@@ -1,6 +1,8 @@
 # dsh-compat-platform
 
-Planned DSH plugin analysis, optional managed coordination and explicitly approved remediation. Reuse official DSH services and the existing GUI rather than another Loader, registry, skill manager or HTTP server.
+DSH plugin analysis, a read-only diagnostics route, fixture-only trusted extraction, and repair that is confined to one directory. Reuse official DSH services and the existing GUI rather than another Loader, registry, skill manager or HTTP server.
+
+**State: `v0.1.0-draft.1`** (2026-11-10). All five packages are version `0.1.0-draft.1`, MIT, and publishable, but **nothing is published** and nothing is certified.
 
 ## Start here
 
