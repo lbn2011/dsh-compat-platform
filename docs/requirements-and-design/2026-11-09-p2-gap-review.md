@@ -44,7 +44,7 @@ against what this repository can actually show.
 | G6 | "snapshots and differences" without labelling absence as disappearance | `compareCombinedReports` reports changes per channel and marks missing/invalid/errored channels incomparable | closed |
 | G7 | dependency **declaration** analysis | `dsh-compat-dependency-shape`: four legal `inject` shapes, item kinds, sizes; no names, no resolution claim | closed |
 | G8 | **loadability** analysis | first increment delivered: a fixture-only observation path that boots a synthetic profile inside a boundary and records per-entry states and failure phases. It is not a loadability verdict for any real plugin — it runs code, stays out of every inert envelope, and says `certification: false`. See `docs/testing/2026-11-09-trusted-extraction.md` | **fixture-only first version done 2026-11-09; real-profile analysis still out of scope** |
-| G9 | **configuration mismatch** analysis | still blocked, but no longer on identity alone. The correspondence entry (`profile-correspondence/0.1-draft.1`, 2026-11-09) lets a caller assert which row is which plugin and has that assertion checked against both documents, so rows and declarations can now be related without inventing anything. A *mismatch* statement would still require reading configuration values, which no artifact in this boundary emits and which the correspondence entry deliberately never reads | **partly unblocked** — identity is assertable; value comparison is still refused by design |
+| G9 | **configuration mismatch** analysis | **closed as far as this boundary allows (2026-11-10).** Two halves were separated and each got an answer. *Identity*: correspondence `0.2-draft.1` lets a caller assert which row is which plugin and has that assertion checked against both documents, so relating rows to declarations no longer requires inventing anything. *Values*: automatic comparison against a profile is refused by decision **D-D** — no tool in this repository reads a `config:` value out of a profile — so an automatic "mismatch" verdict from a profile is deliberately **not implemented**, not pending. What exists instead is `dsh-compat-config-check`, an author-side checker where the caller supplies the instance document and the declared `configSchema`. The artifacts keep saying so (`CONFIG_VALUES_NOT_INSPECTED`, `CONFIG_VALUES_NOT_COMPARED`, `NO_CONFIGURATION_VALUE_IS_EVER_EMITTED`) | **closed by decision** — automatic profile-side value comparison would need a new disclosure decision with its own leak tests, and it has not been taken |
 
 ## 4. Gate assessment
 
@@ -79,9 +79,11 @@ boundary currently forbids.
 2. **G4 — a defined confidence vocabulary, in the same shape change.** Only if it can be tied to
    something already recorded (for example the receipt's `evidenceTier` word); otherwise a
    "confidence" number would be an invented score, which this project has refused elsewhere.
-3. **G9 stays blocked** until one of the two decisions below is made. It must not be faked by
+3. **G9 is closed by decision, not by implementation (2026-11-10).** It must not be faked by
    matching on order or position: two documents listing entries in the same order is a coincidence,
-   not an identity.
+   not an identity. Identity is now assertable (correspondence `0.2-draft.1`); value comparison against
+   a profile is refused by D-D, and the caller-supplied checker is the only route. Reopening it means
+   making a new disclosure decision, which is the user's, not this review's.
 
 ## 6. Decisions this review cannot make
 
