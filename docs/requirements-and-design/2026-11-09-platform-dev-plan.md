@@ -164,10 +164,23 @@ was taken as well: a per-tarball `files` allowlist audit plus the list of decisi
 (`docs/testing/2026-11-10-publish-readiness.md`). Option **B** was taken last and measured the
 *published* `0.2.2-alpha.2`: its manifest, and the export surface of the `dsh-app-boot` build it
 depends on (`boot` and `auditStartupEntries` both present; `docs/testing/2026-11-10-second-version-baseline.md`).
-What is still missing is the actual matrix: no second *installed tree* exists, because that
+What was still missing was the actual matrix: no second *installed tree* exists, because that
 release's 91 direct dependencies do not install inside a 120 s envelope (measured — the unit was
-killed). So the honest state is one measured runtime, one measured published artifact, and the
-link between them (a commit pin) still declared only.
+killed). The link between the two (a commit pin) stays declared only.
+
+**Status 2026-11-10 (later, same day): the behavioural cell is now measured.**
+`scripts/second-version-observe` runs this repository's own adapter — unmodified — against both the
+installed `0.2.2-rc.1` and a **pinned** `0.2.2-alpha.2` closure, and compares per-entry verdicts.
+Two bounded rounds, both `agree=true / differences=0` over four entries, with byte-identical
+observations: `include`/`ok` active, `import-throw` failed at import, `activate-throw` failed at
+activation. The import-vs-activation split therefore survives the version change, which is the
+specific behaviour this repository was built to observe.
+
+Two limits are part of that result, not footnotes. The closure is a **hand-assembled tree** of 339
+packages (recursive `npm pack`, no lockfile, no integrity check) because assembling it takes
+3 m 26 s against a 120 s envelope; its manifest digest is verified every round so an observation
+cannot describe a different runtime than the record names. And agreement on four fixture entries is
+not a compatibility claim. `docs/testing/2026-11-10-second-version-observe.md`.
 
 ### Blocked items
 
