@@ -697,11 +697,12 @@ error becomes `PARSE_ERROR` (exit `2`), and a stream warning becomes `UNEXPECTED
 
 ```json
 {
-  "profileDumpSummary": "profile-dump-summary/0.2-draft.1",
+  "profileDumpSummary": "profile-dump-summary/0.3-draft.1",
   "input": { "bytes": 812, "lines": 23 },
   "documents": 1,
   "inventory": "present",
   "root": "sequence",
+  "identityDisclosed": false,
   "counts": {
     "entries": 2, "entryGroups": 0,
     "entriesWithId": 2, "entriesWithName": 2, "entriesWithConfig": 2, "entriesDisabled": 0,
@@ -710,10 +711,10 @@ error becomes `PARSE_ERROR` (exit `2`), and a stream warning becomes `UNEXPECTED
   "rows": [
     { "index": 1, "line": 2, "keyCount": 3, "idKind": "string", "nameKind": "string",
       "group": "absent", "disabled": "absent", "config": "mapping",
-      "configKeyCount": 2, "unmodelledKeyCount": 0 },
+      "configKeyCount": 2, "unmodelledKeyCount": 0, "id": null, "name": null },
     { "index": 2, "line": 9, "keyCount": 4, "idKind": "string", "nameKind": "string",
       "group": "false", "disabled": "true", "config": "mapping",
-      "configKeyCount": 1, "unmodelledKeyCount": 1 }
+      "configKeyCount": 1, "unmodelledKeyCount": 1, "id": null, "name": null }
   ],
   "rowsTruncated": false,
   "limits": { "maxBytes": 1048576, "maxLines": 20000, "maxDepth": 32,
@@ -1296,8 +1297,8 @@ One JSON document on stdout, `correspondence-summary/0.1-draft.1`:
 
 ```json
 {
-  "correspondenceSummary": "correspondence-summary/0.1-draft.1",
-  "identitySource": "caller-asserted",
+  "correspondenceSummary": "correspondence-summary/0.2-draft.1",
+  "identitySource": "caller-asserted-entry-text-verified",
   "bindings": { "profileSha256": "…", "declarationSha256": "…" },
   "pairs": [ { "index": 1, "line": 21, "disabled": "absent", "config": "mapping",
                "keyCount": 3, "unmodelledKeyCount": 0, "pluginDeclared": true,
@@ -1308,13 +1309,22 @@ One JSON document on stdout, `correspondence-summary/0.1-draft.1`:
   "certification": false,
   "correlation": "not-established",
   "identityDisclosed": false,
+  "entryTextVerified": true,
   "notDerived": [ … seven names … ],
   "limitations": [ … eight codes … ]
 }
 ```
 
 No id, name, note or configuration value is ever copied into the output — the assertion goes in, and
-only its verdict comes out. `identityDisclosed` is always `false`.
+only its verdict comes out. `identityDisclosed` is always `false` for this document.
+
+`entryTextVerified` is what changed in `0.2-draft.1`: the dump text is now read **twice** — once by
+this module's own line scanner and once by the profile summarizer with identity disclosure switched
+on — and the two readings must agree on every row both of them can address. A two-sided
+disagreement refuses the document (`CORRESPONDENCE_ENTRY_TEXT_DISAGREES`). A row only one reading
+can address stays merely unaddressable, so a legal quoted id does not turn into a hard error. The
+pairing is still the caller's assertion: what is verified is that the entry text exists as
+asserted, not that the plugin and the entry are the same thing.
 
 ### 15.4 Exit codes (closed table)
 

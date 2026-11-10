@@ -1,5 +1,5 @@
 /** Format identifier of the profile-dump summary document. */
-export const PROFILE_DUMP_SCHEMA: 'profile-dump-summary/0.2-draft.1';
+export const PROFILE_DUMP_SCHEMA: 'profile-dump-summary/0.3-draft.1';
 
 /**
  * Fixed limits. These are policy limits on the **input** and on the walk this command performs;
@@ -35,6 +35,7 @@ export const PROFILE_DUMP_NOT_DERIVED: readonly [
  * Fixed limitation codes, shaped like `COMBINED_REPORT_LIMITATIONS`: statements about this
  * artifact's envelope rather than about any particular document.
  */
+export const PROFILE_DUMP_DISCLOSURE_LIMITATIONS: readonly string[];
 export const PROFILE_DUMP_LIMITATIONS: readonly string[];
 
 /** Every diagnostic code this module can emit. Closed set. */
@@ -140,6 +141,14 @@ export interface ProfileDumpRow {
   configKeyCount: number | null;
   /** Keys outside the modelled set. Counted only; `plugin.id` inside `config` is not a pointer. */
   unmodelledKeyCount: number;
+  /**
+   * The row's literal `id` text, or `null`. `null` means either "absent / not a literal string"
+   * or "this summary was not asked for disclosure" — read `identityDisclosed` to tell which.
+   * This is operator text from the dump, not a resolved package identity and not a version.
+   */
+  id: string | null;
+  /** The row's literal `name` text, or `null`; same caveats as `id`. Never a config value. */
+  name: string | null;
 }
 
 /** Counts only. No identifier, name, key or value is ever included. */
@@ -168,6 +177,11 @@ export interface ProfileDumpSummary {
   documents: number;
   inventory: 'present' | 'empty' | 'none';
   root: string;
+  /**
+   * Whether this summary was produced with `{ discloseIdentity: true }`. When false, every row's
+   * `id`/`name` is `null` and the disclosure limitations are absent from `limitations`.
+   */
+  identityDisclosed: boolean;
   counts: ProfileDumpCounts | null;
   /**
    * A capped display window over `counts.entries`, `null` wherever `counts` is `null` (a refused
@@ -215,7 +229,10 @@ export interface ProfileDumpResult {
  * @throws {TypeError} When `text` is not a string. The message is fixed and never echoes the
  *   argument.
  */
-export function summarizeProfileDumpText(text: string): ProfileDumpResult;
+export function summarizeProfileDumpText(
+  text: string,
+  options?: { discloseIdentity?: boolean },
+): ProfileDumpResult;
 
 /** Exit code implied by a result: 0, 1 or 2. */
 export function profileDumpExitCode(result: ProfileDumpResult): number;

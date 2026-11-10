@@ -42,6 +42,12 @@ function summarize(text) {
   return { ...result, exit: profileDumpExitCode(result), json: JSON.stringify(result.summary) };
 }
 
+/** Same, with identity disclosure requested. */
+function summarizeDisclosed(text) {
+  const result = summarizeProfileDumpText(text, { discloseIdentity: true });
+  return { ...result, exit: profileDumpExitCode(result), json: JSON.stringify(result.summary) };
+}
+
 /** Assert that a serialized summary contains none of the given substrings. */
 function assertSilent(json, secrets) {
   for (const secret of secrets) {
@@ -837,6 +843,8 @@ describe('profile-dump — rows are a closed window, not an inventory', () => {
       config: 'mapping',
       configKeyCount: 1,
       unmodelledKeyCount: 0,
+      id: null,
+      name: null,
     });
     assert.equal(summary.rows[1].disabled, 'true');
     assert.equal(summary.rows[1].config, 'absent');
@@ -969,8 +977,8 @@ describe('profile-dump CLI — a real repository fixture and both failure paths 
   /** The shipped example profile, addressed as a filesystem path. Missing is a failure, not a skip. */
   const EXAMPLE = fileURLToPath(new URL('../../../examples/diagnose/profile.yml', import.meta.url));
 
-  function runProcess(path) {
-    return spawnSync(process.execPath, ['--max-old-space-size=192', CLI_PATH, path], {
+  function runProcess(path, extraArgs = []) {
+    return spawnSync(process.execPath, ['--max-old-space-size=192', CLI_PATH, ...extraArgs, path], {
       encoding: 'utf8',
       timeout: 5000,
       maxBuffer: 262144,
@@ -1044,4 +1052,168 @@ describe('profile-dump CLI — a real repository fixture and both failure paths 
     assert.equal(parsed.notDerived.length, 5);
     assert.equal(parsed.limitations.length, 8);
   });
+});
+
+describe('profile-dump — identity disclosure is opt-in, and never a config value', () => {
+  const dump = [
+    '# == @fixture/dsh-bundle-probe',
+    '- id: alpha-entry',
+    '  name: ./plugins/alpha.js',
+    '  config:',
+    '    marker: sentinel-config-value',
+    '    nested:',
+    '      deep: sentinel-deeper-value',
+    '- id: beta-entry',
+    '  name: Example Beta Display Name',
+    '  disabled: true',
+    '',
+  ].join('\n');
+
+  test('the default summary discloses nothing and says so', () => {
+    const { summary, json } = summarize(dump);
+    assert.equal(summary.identityDisclosed, false);
+    assert.deepEqual(
+      summary.rows.map((row) => [row.id, row.name]),
+      [
+        [null, null],
+        [null, null],
+      ],
+    );
+    // The strongest statement available: even the strings that legitimately exist in this
+    // document are absent from the serialized summary.
+    assertSilent(json, ['alpha-entry', 'beta-entry', 'plugins/alpha.js', 'Example Beta', 'sentinel-config-value']);
+  });
+
+  test('the default limitations list does not warn about text it never emits', () => {
+    const { summary } = summarize(dump);
+    assert.equal(summary.limitations.length, 8);
+    assert.equal(summary.limitations.includes('IDENTITY_TEXT_IS_OPERATOR_TEXT_AND_MAY_CARRY_PATHS_OR_PRIVATE_NAMES'), false);
+  });
+
+  test('disclosure copies the literal id and name, and nothing else', () => {
+    const { summary, json, exit } = summarizeDisclosed(dump);
+    assert.equal(exit, 0);
+    assert.equal(summary.identityDisclosed, true);
+    assert.deepEqual(
+      summary.rows.map((row) => [row.id, row.name]),
+      [
+        ['alpha-entry', './plugins/alpha.js'],
+        ['beta-entry', 'Example Beta Display Name'],
+      ],
+    );
+    // Disclosure is about identity text only: config keys and values stay out.
+    assertSilent(json, ['sentinel-config-value', 'sentinel-deeper-value', 'marker', 'nested', 'deep']);
+  });
+
+  test('disclosure appends its own three limitations and keeps the base eight', () => {
+    const { summary } = summarizeDisclosed(dump);
+    assert.equal(summary.limitations.length, 11);
+    assert.deepEqual(summary.limitations.slice(8), [
+      'IDENTITY_TEXT_IS_OPERATOR_TEXT_AND_MAY_CARRY_PATHS_OR_PRIVATE_NAMES',
+      'IDENTITY_TEXT_IS_NOT_A_PACKAGE_IDENTITY_AND_NOT_A_VERSION',
+      'CONFIG_VALUES_ARE_NEVER_EMITTED_EVEN_WHEN_IDENTITY_IS_DISCLOSED',
+    ]);
+    assert.equal(summary.notDerived.length, 5);
+    assert.equal(summary.certification, false);
+  });
+
+  test('a non-literal id or name is null even under disclosure, never stringified', () => {
+    const text = ['- id: !!js process.env.SECRET_NAME', '  name: [sentinel-name-a, sentinel-name-b]', ''].join('\n');
+    const { summary, json } = summarizeDisclosed(text);
+    assert.deepEqual(summary.rows.map((row) => [row.idKind, row.nameKind]), [['non-string', 'non-string']]);
+    assert.deepEqual(summary.rows.map((row) => [row.id, row.name]), [[null, null]]);
+    // A sequence name is a non-literal value: it is counted, never joined into a string.
+    assertSilent(json, ['SECRET_NAME', 'sentinel-name-a', 'sentinel-name-b']);
+  });
+
+  test('an absent id stays null under disclosure', () => {
+    const { summary } = summarizeDisclosed('- name: ./plugins/only-name.js\n');
+    assert.equal(summary.rows[0].idKind, 'absent');
+    assert.equal(summary.rows[0].id, null);
+    assert.equal(summary.rows[0].name, './plugins/only-name.js');
+  });
+
+  test('a refused document discloses nothing, because it has no rows', () => {
+    const { summary } = summarizeDisclosed('id: alpha-entry\n');
+    assert.equal(summary.rows, null);
+    assert.equal(summary.identityDisclosed, true);
+    assert.deepEqual(summary.limitations.length, 11);
+  });
+
+  test('an unknown option key is refused, never ignored', () => {
+    // A typo in the option name must not produce a summary that looks disclosure-free
+    // while the caller believes it asked for text.
+    assert.throws(() => summarizeProfileDumpText('', { discloseIdentty: true }), TypeError);
+    assert.throws(() => summarizeProfileDumpText('', { discloseIdentity: 'yes' }), TypeError);
+    assert.throws(() => summarizeProfileDumpText('', null), TypeError);
+    assert.throws(() => summarizeProfileDumpText('', []), TypeError);
+    assert.throws(() => summarizeProfileDumpText('', 'truthy'), TypeError);
+  });
+
+  test('an explicit false is the same as omitting the option', () => {
+    const omitted = summarize(dump).summary;
+    const explicit = summarizeProfileDumpText(dump, { discloseIdentity: false }).summary;
+    assert.deepEqual(explicit, omitted);
+  });
+
+describe('profile-dump CLI — the disclosure flag is a process-level switch', () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'profile-dump-disclose-'));
+  after(() => rmSync(scratch, { recursive: true, force: true }));
+
+  function run(args) {
+    return spawnSync(process.execPath, ['--max-old-space-size=192', CLI_PATH, ...args], {
+      encoding: 'utf8',
+      timeout: 5000,
+      maxBuffer: 262144,
+      killSignal: 'SIGKILL',
+      env: {
+        PATH: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
+        HOME: homedir(),
+        TMPDIR: tmpdir(),
+      },
+    });
+  }
+
+  const fixture = join(scratch, 'profile.yml');
+  writeFileSync(
+    fixture,
+    ['- id: cli-alpha', '  name: ./plugins/cli-alpha.js', '  config:', '    token: sentinel-cli-config', ''].join('\n'),
+  );
+
+  test('without the flag the document carries no id or name text', () => {
+    const result = run([fixture]);
+    assert.equal(result.status, PROFILE_DUMP_EXIT.OK, result.stderr);
+    assert.equal(result.stdout.includes('cli-alpha'), false);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.identityDisclosed, false);
+    assert.deepEqual(parsed.rows.map((row) => [row.id, row.name]), [[null, null]]);
+  });
+
+  test('with the flag the id and name appear, the config value still does not', () => {
+    const result = run(['--disclose-identity', fixture]);
+    assert.equal(result.status, PROFILE_DUMP_EXIT.OK, result.stderr);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.identityDisclosed, true);
+    assert.deepEqual(parsed.rows.map((row) => [row.id, row.name]), [['cli-alpha', './plugins/cli-alpha.js']]);
+    assert.equal(result.stdout.includes('sentinel-cli-config'), false);
+    assert.equal(parsed.limitations.length, 11);
+  });
+
+  test('the flag is accepted after the path as well as before it', () => {
+    const result = run([fixture, '--disclose-identity']);
+    assert.equal(result.status, PROFILE_DUMP_EXIT.OK, result.stderr);
+    assert.equal(JSON.parse(result.stdout).identityDisclosed, true);
+  });
+
+  test('a repeated flag is a usage error, not a silent second disclosure', () => {
+    const result = run(['--disclose-identity', '--disclose-identity', fixture]);
+    assert.equal(result.status, PROFILE_DUMP_EXIT.USAGE);
+    assert.equal(JSON.parse(result.stdout).diagnostics[0].code, PROFILE_DUMP_CODES.USAGE);
+  });
+
+  test('an unknown option-shaped argument is still a usage error, not a filename', () => {
+    const result = run(['--disclose', fixture]);
+    assert.equal(result.status, PROFILE_DUMP_EXIT.USAGE);
+  });
+});
 });

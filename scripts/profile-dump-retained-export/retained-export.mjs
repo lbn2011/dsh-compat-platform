@@ -86,7 +86,7 @@ const CHILD_HEAP_MB = 192;
  * refuses an unknown shape — the two are distinguishable by the version string
  * alone, which is the reason the version was bumped.
  */
-const SUMMARY_SCHEMA = 'profile-dump-summary/0.2-draft.1';
+const SUMMARY_SCHEMA = 'profile-dump-summary/0.3-draft.1';
 
 /**
  * The three retained samples, each pinned by bytes and digest.
@@ -129,6 +129,7 @@ const SUMMARY_KEYS = Object.freeze([
   'documents',
   'inventory',
   'root',
+  'identityDisclosed',
   'counts',
   'rows',
   'rowsTruncated',
@@ -159,6 +160,8 @@ const ROW_KEYS = Object.freeze([
   'config',
   'configKeyCount',
   'unmodelledKeyCount',
+  'id',
+  'name',
 ]);
 const ROW_TEXT_KINDS = Object.freeze(['absent', 'string', 'non-string']);
 const ROW_FLAG_KINDS = Object.freeze(['absent', 'true', 'false', 'null', 'other']);
@@ -571,6 +574,7 @@ function judgeSummary(doc, expect) {
   if (!isNonNegativeInt(doc.documents)) return { ok: false, code: 65, reason: 'documents-type' };
   if (stringOutside(doc.inventory, INVENTORY_VALUES)) return { ok: false, code: 65, reason: 'inventory-value' };
   if (stringOutside(doc.root, ROOT_VALUES)) return { ok: false, code: 65, reason: 'root-value' };
+  if (typeof doc.identityDisclosed !== 'boolean') return { ok: false, code: 65, reason: 'identity-disclosed-type' };
   if (doc.counts !== null) {
     if (keysViolate(doc.counts, COUNTS_KEYS)) return { ok: false, code: 65, reason: 'counts-keys' };
     // Only the two documented counters are pinned; every other counter is
@@ -593,6 +597,9 @@ function judgeSummary(doc, expect) {
     return { ok: false, code: 65, reason: 'runtime-validation-value' };
   }
   if (doc.certification !== false) return { ok: false, code: 65, reason: 'certification-value' };
+  // The retention samples are summarised without the disclosure flag, so the disclosure
+  // limitations must not be present: the pinned list below is the eight-code base list.
+  if (doc.identityDisclosed !== false) return { ok: false, code: 66, reason: 'identity-disclosed' };
 
   // ---- rows: a capped display window over `counts.entries`, never an inventory
   if (!Array.isArray(doc.rows) && doc.rows !== null) return { ok: false, code: 65, reason: 'rows-type' };
@@ -635,6 +642,18 @@ function judgeSummary(doc, expect) {
       // `keyCount`; nothing is asserted about the complement, because a row may legitimately
       // carry two modelled keys and three unmodelled ones.
       if (row.unmodelledKeyCount > row.keyCount) return { ok: false, code: 65, reason: 'row-unmodelled-over-key-count' };
+      // `id`/`name` are text or null — never a number, object or boolean. This sample set is
+      // summarised WITHOUT `--disclose-identity`, so both must be null here; that is the
+      // strongest available statement that the default path emits no row text at all.
+      for (const key of ['id', 'name']) {
+        const value = row[key];
+        if (value !== null && typeof value !== 'string') {
+          return { ok: false, code: 65, reason: `row-${key}-type` };
+        }
+        if (doc.identityDisclosed === false && value !== null) {
+          return { ok: false, code: 65, reason: `row-${key}-without-disclosure` };
+        }
+      }
     }
   }
 

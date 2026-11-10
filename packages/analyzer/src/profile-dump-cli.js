@@ -43,10 +43,13 @@ import {
 const USAGE_TEXT = `dsh-compat-profile-dump — summarize one dsh --dump-config export
 
 Usage:
-  dsh-compat-profile-dump <dump.yml>
+  dsh-compat-profile-dump [--disclose-identity] <dump.yml>
 
   Reads exactly one explicitly named regular file (no stdin, no globs, no defaults) and
   prints one JSON summary on stdout. Usage text goes to stderr.
+
+  --disclose-identity  Copy each row's literal id and name text into the summary.
+                       Off by default. Config values are never copied, with or without it.
 
 Exit codes:
   0   parsed; no entry-level diagnostics (the presence of !!js alone stays 0)
@@ -221,8 +224,18 @@ export async function main(argv, io = {}) {
   // True when the single JSON document reached stdout. There is never a second attempt.
   const emit = (document) => writeOnce(stdout, `${JSON.stringify(document, null, 2)}\n`);
 
-  if (args.length !== 1 || args[0] === '-' || args[0].startsWith('-')) {
-    // No stdin, no flags: an option-shaped argument is a usage error, not a filename.
+  // One positional path, at most one `--disclose-identity`. Any other option-shaped argument is a
+  // usage error rather than a filename: a typo must not become a path this command tries to read.
+  const discloseIdentity = args.includes('--disclose-identity');
+  const positional = args.filter((arg) => arg !== '--disclose-identity');
+  const flagCount = args.length - positional.length;
+  const bad =
+    positional.length !== 1 ||
+    flagCount > 1 ||
+    positional[0] === '-' ||
+    positional[0].startsWith('-');
+
+  if (bad) {
     const usageWritten = await writeOnce(stderr, USAGE_TEXT);
     const jsonWritten = await emit(
       envelope([{ ordinal: null, code: PROFILE_DUMP_CODES.USAGE, line: null, detail: null }]),
@@ -233,7 +246,8 @@ export async function main(argv, io = {}) {
     return usageWritten ? PROFILE_DUMP_EXIT.USAGE : PROFILE_DUMP_EXIT.INTERNAL;
   }
 
-  const target = args[0];
+  // The positional path, not `args[0]`: with the flag first, `args[0]` is the flag.
+  const target = positional[0];
 
   let text;
   try {
@@ -250,7 +264,7 @@ export async function main(argv, io = {}) {
 
   let result;
   try {
-    result = summarizeProfileDumpText(text);
+    result = summarizeProfileDumpText(text, { discloseIdentity });
   } catch {
     // Includes an escaping RangeError from the parser's own recursion.
     const written = await emit(

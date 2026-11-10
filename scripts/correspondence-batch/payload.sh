@@ -99,7 +99,7 @@ const read = (path) => { try { return readFileSync(path, 'utf8'); } catch { retu
 const src = read(srcPath);
 const cli = read(cliPath);
 const versionRe = /CORRESPONDENCE_VERSION\s*=\s*['"]profile-correspondence\/0\.1-draft\.1['"]/;
-const summaryRe = /CORRESPONDENCE_SUMMARY\s*=\s*['"]correspondence-summary\/0\.1-draft\.1['"]/;
+const summaryRe = /CORRESPONDENCE_SUMMARY\s*=\s*['"]correspondence-summary\/0\.2-draft\.1['"]/;
 const versionOk = typeof src === 'string' && versionRe.test(src);
 const summaryOk = typeof src === 'string' && summaryRe.test(src);
 say(`version_literal_exact=${versionOk ? 'pass' : 'fail'}`);

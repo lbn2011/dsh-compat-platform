@@ -273,6 +273,13 @@ test('the CLI writes no files and creates no directories', () => {
       })
       .sort();
 
+  // `node_modules/` may already exist: the install batch deliberately targets
+  // `packages/analyzer/node_modules/yaml`, so its presence is a property of this checkout, not of
+  // this CLI. What must hold is that the CLI creates nothing — hence "absent before and after"
+  // rather than "absent", which would fail on any machine that ran the installer.
+  const strays = ['report.json', 'out.json', 'dsh-compat-report.json', 'dist', 'node_modules', '.cache'];
+  const preexisting = new Set(strays.filter((stray) => existsSync(`${packageRoot}${stray}`)));
+
   const before = snapshot(packageRoot);
   run(['--validator', validator, 'fixtures/with-conflict.json']);
   run(['--validator', validator, 'fixtures/invalid-declaration.json']);
@@ -280,7 +287,8 @@ test('the CLI writes no files and creates no directories', () => {
   const after = snapshot(packageRoot);
 
   assert.deepEqual(after, before);
-  for (const stray of ['report.json', 'out.json', 'dsh-compat-report.json', 'dist', 'node_modules', '.cache']) {
+  for (const stray of strays) {
+    if (preexisting.has(stray)) continue;
     assert.equal(existsSync(`${packageRoot}${stray}`), false, `CLI must not create ${stray}`);
   }
 });

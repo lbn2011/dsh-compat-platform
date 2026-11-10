@@ -51,7 +51,7 @@ import { summarizeProfileDumpText } from './profile-dump.js';
 export const CORRESPONDENCE_VERSION = 'profile-correspondence/0.1-draft.1';
 
 /** Format identifier of the document this module produces. */
-export const CORRESPONDENCE_SUMMARY = 'correspondence-summary/0.1-draft.1';
+export const CORRESPONDENCE_SUMMARY = 'correspondence-summary/0.2-draft.1';
 
 /** Exit codes for the command. `1` and `2` mean different things on purpose. */
 export const CORRESPONDENCE_EXIT = Object.freeze({
@@ -81,6 +81,7 @@ export const CORRESPONDENCE_CODES = Object.freeze({
   CORRESPONDENCE_PROFILE_ROW_COUNT_MISMATCH: 'CORRESPONDENCE_PROFILE_ROW_COUNT_MISMATCH',
   CORRESPONDENCE_ENTRY_NOT_FOUND: 'CORRESPONDENCE_ENTRY_NOT_FOUND',
   CORRESPONDENCE_ENTRY_AMBIGUOUS: 'CORRESPONDENCE_ENTRY_AMBIGUOUS',
+  CORRESPONDENCE_ENTRY_TEXT_DISAGREES: 'CORRESPONDENCE_ENTRY_TEXT_DISAGREES',
   CORRESPONDENCE_DECLARATION_NOT_AN_OBJECT: 'CORRESPONDENCE_DECLARATION_NOT_AN_OBJECT',
   CORRESPONDENCE_PLUGIN_NOT_DECLARED: 'CORRESPONDENCE_PLUGIN_NOT_DECLARED',
   CORRESPONDENCE_DUPLICATE_PLUGIN_ID: 'CORRESPONDENCE_DUPLICATE_PLUGIN_ID',
@@ -112,7 +113,8 @@ export const CORRESPONDENCE_LIMITATIONS = Object.freeze([
   'CONFIG_VALUES_NOT_COMPARED',
   'CAPABILITY_SATISFACTION_NOT_CHECKED',
   'ROW_SET_COMPLETENESS_UNKNOWN',
-  'IDENTITY_TEXT_NEVER_EMITTED',
+  'IDENTITY_TEXT_IS_READ_FROM_THE_DUMP_AND_NEVER_RE_EMITTED',
+  'ENTRY_TEXT_IS_OPERATOR_TEXT_NOT_A_PACKAGE_IDENTITY',
   'CERTIFICATION_NOT_CLAIMED',
   'INPUT_IS_PARSED_TEXT_NOT_A_SANDBOX',
 ]);
@@ -420,7 +422,9 @@ export function checkCorrespondence(input) {
 
   let summarized;
   try {
-    summarized = summarizeProfileDumpText(profileText);
+    // Disclosure is requested here, inside this process, only so the ids written in the dump
+    // can be compared with the ids the caller asserted. Nothing from it is copied out.
+    summarized = summarizeProfileDumpText(profileText, { discloseIdentity: true });
   } catch {
     // Includes an escaping RangeError from the parser's own recursion.
     return refuse(CORRESPONDENCE_CODES.CORRESPONDENCE_PROFILE_UNREADABLE);
@@ -447,6 +451,23 @@ export function checkCorrespondence(input) {
     const existing = ordinalsById.get(entry.id);
     if (existing === undefined) ordinalsById.set(entry.id, [entry.ordinal]);
     else existing.push(entry.ordinal);
+  }
+
+  // Second, independent reading of the same bytes. The scanner above walks the text itself; the
+  // summarizer parses it. Where BOTH readings address the same row they must agree; a divergence
+  // means one of them is wrong about what this document says, and a check built on either would
+  // describe a document nobody has.
+  //
+  // Only a two-sided disagreement is a refusal. A row one reading cannot address (a quoted value
+  // the scanner will not treat as a bare token, say) stays merely unaddressable: refusing the
+  // whole document there would turn a legal YAML string into a hard error, which is the
+  // over-reach this artifact is supposed to avoid.
+  for (const row of profileSummary.rows) {
+    const scanned = scan.entries.find((entry) => entry.ordinal === row.index);
+    if (scanned === undefined) continue;
+    if (scanned.id !== null && row.id !== null && scanned.id !== row.id) {
+      return refuse(CORRESPONDENCE_CODES.CORRESPONDENCE_ENTRY_TEXT_DISAGREES);
+    }
   }
   const rowsByIndex = new Map();
   for (const row of profileSummary.rows) rowsByIndex.set(row.index, row);
@@ -524,14 +545,17 @@ export function checkCorrespondence(input) {
 
   return {
     correspondenceSummary: CORRESPONDENCE_SUMMARY,
-    identitySource: 'caller-asserted',
+    identitySource: 'caller-asserted-entry-text-verified',
     bindings: { profileSha256, declarationSha256 },
     pairs: outputPairs,
     findings,
     counts: { pairs: pairs.length, matched, refused: 0, findings: findings.length },
     certification: false,
     correlation: 'not-established',
+    // The summary below never carries an id or a name: the dump text is read to VERIFY an
+    // assertion, and then dropped. `identityDisclosed` stays false for the output document.
     identityDisclosed: false,
+    entryTextVerified: true,
     notDerived: [...CORRESPONDENCE_NOT_DERIVED],
     limitations: [...CORRESPONDENCE_LIMITATIONS],
   };

@@ -11,7 +11,7 @@
 export declare const CORRESPONDENCE_VERSION: 'profile-correspondence/0.1-draft.1';
 
 /** Format identifier of the summary document. */
-export declare const CORRESPONDENCE_SUMMARY: 'correspondence-summary/0.1-draft.1';
+export declare const CORRESPONDENCE_SUMMARY: 'correspondence-summary/0.2-draft.1';
 
 /** Exit codes for the command. */
 export declare const CORRESPONDENCE_EXIT: Readonly<{
@@ -70,7 +70,8 @@ export declare const CORRESPONDENCE_LIMITATIONS: readonly [
   'CONFIG_VALUES_NOT_COMPARED',
   'CAPABILITY_SATISFACTION_NOT_CHECKED',
   'ROW_SET_COMPLETENESS_UNKNOWN',
-  'IDENTITY_TEXT_NEVER_EMITTED',
+  'IDENTITY_TEXT_IS_READ_FROM_THE_DUMP_AND_NEVER_RE_EMITTED',
+  'ENTRY_TEXT_IS_OPERATOR_TEXT_NOT_A_PACKAGE_IDENTITY',
   'CERTIFICATION_NOT_CLAIMED',
   'INPUT_IS_PARSED_TEXT_NOT_A_SANDBOX',
 ];
@@ -126,8 +127,8 @@ export interface CorrespondenceSummaryPair {
 
 /** The summary document of design §5. */
 export interface CorrespondenceSummary {
-  readonly correspondenceSummary: 'correspondence-summary/0.1-draft.1';
-  readonly identitySource: 'caller-asserted';
+  readonly correspondenceSummary: 'correspondence-summary/0.2-draft.1';
+  readonly identitySource: 'caller-asserted-entry-text-verified';
   readonly bindings: CorrespondenceBindings;
   readonly pairs: readonly CorrespondenceSummaryPair[];
   readonly findings: readonly CorrespondenceFinding[];
@@ -140,6 +141,11 @@ export interface CorrespondenceSummary {
   readonly certification: false;
   readonly correlation: 'not-established';
   readonly identityDisclosed: false;
+  /**
+   * The asserted entry ids were checked against the dump's own text (two independent readings of
+   * the same bytes). The text itself is never copied into this document.
+   */
+  readonly entryTextVerified: true;
   readonly notDerived: readonly string[];
   readonly limitations: readonly string[];
 }

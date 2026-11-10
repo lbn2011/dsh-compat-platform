@@ -123,7 +123,7 @@ function assertSilent(json) {
 
 test('the format identifiers and exit codes are the ones the design fixes', () => {
   assert.equal(CORRESPONDENCE_VERSION, 'profile-correspondence/0.1-draft.1');
-  assert.equal(CORRESPONDENCE_SUMMARY, 'correspondence-summary/0.1-draft.1');
+  assert.equal(CORRESPONDENCE_SUMMARY, 'correspondence-summary/0.2-draft.1');
   assert.deepEqual({ ...CORRESPONDENCE_EXIT }, { OK: 0, FINDINGS: 1, REFUSED: 2, INTERNAL: 5, USAGE: 64 });
   assert.equal(Object.isFrozen(CORRESPONDENCE_EXIT), true);
 });
@@ -145,6 +145,7 @@ test('the code list is closed, frozen and carries exactly the documented codes',
     'CORRESPONDENCE_PROFILE_ROW_COUNT_MISMATCH',
     'CORRESPONDENCE_ENTRY_NOT_FOUND',
     'CORRESPONDENCE_ENTRY_AMBIGUOUS',
+    'CORRESPONDENCE_ENTRY_TEXT_DISAGREES',
     'CORRESPONDENCE_DECLARATION_NOT_AN_OBJECT',
     'CORRESPONDENCE_PLUGIN_NOT_DECLARED',
     'CORRESPONDENCE_DUPLICATE_PLUGIN_ID',
@@ -162,7 +163,8 @@ test('the two closure lists are copied verbatim from the design', () => {
     'CONFIG_VALUES_NOT_COMPARED',
     'CAPABILITY_SATISFACTION_NOT_CHECKED',
     'ROW_SET_COMPLETENESS_UNKNOWN',
-    'IDENTITY_TEXT_NEVER_EMITTED',
+    'IDENTITY_TEXT_IS_READ_FROM_THE_DUMP_AND_NEVER_RE_EMITTED',
+    'ENTRY_TEXT_IS_OPERATOR_TEXT_NOT_A_PACKAGE_IDENTITY',
     'CERTIFICATION_NOT_CLAIMED',
     'INPUT_IS_PARSED_TEXT_NOT_A_SANDBOX',
   ]);
@@ -193,6 +195,7 @@ test('the summary key set is closed in both directions', () => {
     'certification',
     'correlation',
     'identityDisclosed',
+    'entryTextVerified',
     'notDerived',
     'limitations',
   ];
@@ -499,8 +502,10 @@ test('the happy path reports every documented field and no finding', () => {
   ]);
   assert.equal(result.refused, undefined);
   assert.equal(result.correspondenceSummary, CORRESPONDENCE_SUMMARY);
-  assert.equal(result.identitySource, 'caller-asserted');
+  assert.equal(result.identitySource, 'caller-asserted-entry-text-verified');
+  // The output never carries an id or a name; the dump text is read to verify, then dropped.
   assert.equal(result.identityDisclosed, false);
+  assert.equal(result.entryTextVerified, true);
   assert.equal(result.correlation, 'not-established');
   assert.equal(result.certification, false);
   assert.deepEqual(result.counts, { pairs: 2, matched: 2, refused: 0, findings: 0 });
@@ -860,4 +865,53 @@ test('no asserted id, plugin id or note appears anywhere in the output', (t) => 
   const document = JSON.parse(result.stdout);
   assert.equal(document.identityDisclosed, false);
   assert.equal(document.pairs[0].line, 1);
+});
+
+test('the dump text is read twice and the readings are cross-checked', () => {
+  // The scanner walks the text; the summarizer parses it, asking for id disclosure so the two
+  // readings can be compared row by row. Agreement is what makes an asserted id a statement
+  // about THIS document rather than about the caller's memory of it.
+  //
+  // The disagreement refusal (`CORRESPONDENCE_ENTRY_TEXT_DISAGREES`) is defensive: the scanner is
+  // deliberately a strict subset of what the parser accepts (a quoted value, a comment tail or a
+  // tag makes a row unaddressable rather than contradictory), so no document in this suite can
+  // reach it. It exists for the case where that relationship stops holding, and it is NOT
+  // claimed as covered by a measurement.
+  const profileText = ['- id: alpha', '  name: ./plugins/alpha.js', ''].join('\n');
+  const ok = check(profileText, DECLARATION_TWO_PLUGINS, [
+    { entryId: 'alpha', pluginId: 'plugin.alpha' },
+  ]);
+  assert.equal(ok.refused, undefined);
+  assert.equal(ok.entryTextVerified, true);
+  // Verification is internal: the output pairs carry row shape, never the row's text.
+  assert.deepEqual(Object.keys(ok.pairs[0]), [
+    'index',
+    'line',
+    'disabled',
+    'config',
+    'keyCount',
+    'unmodelledKeyCount',
+    'pluginDeclared',
+    'capabilitiesRequired',
+    'capabilitiesOptional',
+    'resources',
+    'findings',
+  ]);
+  assert.equal(JSON.stringify(ok.pairs).includes('alpha'), false);
+  assert.equal(JSON.stringify(ok.findings).includes('alpha'), false);
+});
+
+test('a row one reading cannot address stays unaddressable rather than poisoning the document', () => {
+  // A quoted id is a legal YAML string the summarizer reads, but the line scanner refuses to
+  // treat a quoted value as a bare token. That is a one-sided gap, not a contradiction, so the
+  // document stays usable and only the quoted entry is unaddressable.
+  const profileText = ['- id: "quoted"', '  name: q', '- id: plain', '  name: p', ''].join('\n');
+  const quoted = check(profileText, DECLARATION_TWO_PLUGINS, [
+    { entryId: 'quoted', pluginId: 'plugin.alpha' },
+  ]);
+  assertRefused(quoted, CORRESPONDENCE_CODES.CORRESPONDENCE_ENTRY_NOT_FOUND);
+  const plain = check(profileText, DECLARATION_TWO_PLUGINS, [
+    { entryId: 'plain', pluginId: 'plugin.alpha' },
+  ]);
+  assert.equal(plain.refused, undefined);
 });

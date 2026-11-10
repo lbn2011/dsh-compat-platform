@@ -96,7 +96,7 @@ const dump = await importInstalled('dsh-compat-platform/profile-dump');
 if (dump !== '') {
   const result = dump.summarizeProfileDumpText('- id: alpha\n  name: ./plugin.mjs\n');
   const summary = result?.summary ?? result;
-  check('call:profile-dump', summary?.profileDumpSummary === 'profile-dump-summary/0.2-draft.1',
+  check('call:profile-dump', summary?.profileDumpSummary === 'profile-dump-summary/0.3-draft.1',
     String(summary?.profileDumpSummary ?? 'none'));
   check('call:profile-dump-counts', summary?.counts?.entries === 1, String(summary?.counts?.entries));
 }

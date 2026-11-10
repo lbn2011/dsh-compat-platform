@@ -40,7 +40,7 @@ import { isAlias, isMap, isScalar, isSeq, parseAllDocuments } from 'yaml';
  * alone. The counters are unchanged; the version says "there are rows now", not "the numbers
  * moved".
  */
-export const PROFILE_DUMP_SCHEMA = 'profile-dump-summary/0.2-draft.1';
+export const PROFILE_DUMP_SCHEMA = 'profile-dump-summary/0.3-draft.1';
 
 /** Fixed, non-configurable limits. Deliberately not exposed as CLI options. */
 export const PROFILE_DUMP_LIMITS = Object.freeze({
@@ -87,6 +87,17 @@ export const PROFILE_DUMP_LIMITATIONS = Object.freeze([
   'CONFIG_VALUES_NOT_INSPECTED',
   'CERTIFICATION_NOT_CLAIMED',
   'INPUT_IS_PARSED_TEXT_NOT_A_SANDBOX',
+]);
+
+/**
+ * Limitations added **only** to a summary whose caller asked for identity disclosure. They are
+ * appended per summary, so a summary that never asked for text does not carry a warning about
+ * text it does not contain.
+ */
+export const PROFILE_DUMP_DISCLOSURE_LIMITATIONS = Object.freeze([
+  'IDENTITY_TEXT_IS_OPERATOR_TEXT_AND_MAY_CARRY_PATHS_OR_PRIVATE_NAMES',
+  'IDENTITY_TEXT_IS_NOT_A_PACKAGE_IDENTITY_AND_NOT_A_VERSION',
+  'CONFIG_VALUES_ARE_NEVER_EMITTED_EVEN_WHEN_IDENTITY_IS_DISCLOSED',
 ]);
 
 /** The one tag this command accepts without understanding: the DSH expression form. */
@@ -522,15 +533,17 @@ function unmodelledKeyCount(row) {
  * Build one row: position, line, and closed-vocabulary shape facts only.
  *
  * This is deliberately *not* a structured declaration. It answers "what does this dump row look
- * like" and can never answer "what will this profile load", which is why it carries no id, no
- * name, no config value and no dependency statement.
+ * like" and can never answer "what will this profile load". It never carries a config value or a
+ * dependency statement; `id`/`name` are present only when the caller explicitly asked for
+ * disclosure, and even then they are operator text, not a resolved package identity.
  *
  * @param {import('yaml').YAMLMap} row Entry mapping that is already known to be a mapping.
  * @param {number} index Zero-based position in the root sequence.
  * @param {number|null} line 1-based line the row starts on.
+ * @param {boolean} discloseIdentity Whether this summary was asked for id/name text.
  * @returns {object} Row with a fixed key order.
  */
-function buildRow(row, index, line) {
+function buildRow(row, index, line, discloseIdentity) {
   const idPair = findPair(row, KEY_ID);
   const namePair = findPair(row, KEY_NAME);
   const configPair = findPair(row, KEY_CONFIG);
@@ -551,6 +564,10 @@ function buildRow(row, index, line) {
       : (configIsMapping ? ROW_CONFIG_KIND.MAPPING : ROW_CONFIG_KIND.NOT_MAPPING),
     configKeyCount: configIsMapping ? configPair.value.items.length : null,
     unmodelledKeyCount: unmodelledKeyCount(row),
+    // Both are null unless the caller opted in — and even then only a literal-string value is
+    // copied. Nothing else about the row's text is reachable from this artifact.
+    id: discloseIdentity && isLiteralString(idPair?.value) ? idPair.value.value : null,
+    name: discloseIdentity && isLiteralString(namePair?.value) ? namePair.value.value : null,
   };
 }
 
@@ -640,7 +657,7 @@ function checkEntries(state, root, lineOf) {
     if (state.rows.length >= PROFILE_DUMP_LIMITS.maxRows) {
       state.rowsTruncated = true;
     } else {
-      state.rows.push(buildRow(row, index, lineOf(row.range?.[0])));
+      state.rows.push(buildRow(row, index, lineOf(row.range?.[0]), state.discloseIdentity));
     }
   }
 }
@@ -672,12 +689,15 @@ function emptyCounts() {
  * @returns {object} Summary document.
  */
 function buildSummary(state, inventory, root, input) {
+  const limitations = [...PROFILE_DUMP_LIMITATIONS];
+  if (state.discloseIdentity) limitations.push(...PROFILE_DUMP_DISCLOSURE_LIMITATIONS);
   return {
     profileDumpSummary: PROFILE_DUMP_SCHEMA,
     input: { bytes: input.bytes, lines: input.lines },
     documents: input.documents,
     inventory,
     root,
+    identityDisclosed: state.discloseIdentity,
     counts: inventory === 'none' ? null : state.counts,
     // Rows follow `counts` and are null wherever the counters are null: a refused document has no
     // inventory to window over, and an empty array would read as "there are no entries".
@@ -691,30 +711,62 @@ function buildSummary(state, inventory, root, input) {
     certification: false,
     // Copied per summary, so a caller may adapt its own copy without touching the shared list.
     notDerived: [...PROFILE_DUMP_NOT_DERIVED],
-    limitations: [...PROFILE_DUMP_LIMITATIONS],
+    limitations,
   };
+}
+
+/**
+ * Read the only option this module accepts.
+ *
+ * An unknown key is refused rather than ignored: silently dropping `{discloseIdentty: true}`
+ * would produce a summary that looks disclosure-free while the caller believes otherwise.
+ *
+ * @param {unknown} options Caller-supplied options.
+ * @returns {boolean} Whether identity text was requested.
+ * @throws {TypeError} On any shape other than an empty object or `{discloseIdentity: boolean}`.
+ */
+function readDisclosureOption(options) {
+  if (options === null || typeof options !== 'object' || Array.isArray(options)) {
+    throw new TypeError('profile-dump: options must be an object');
+  }
+  const keys = Object.keys(options);
+  for (const key of keys) {
+    if (key !== 'discloseIdentity') {
+      throw new TypeError('profile-dump: options carry an unknown key');
+    }
+  }
+  if (!Object.prototype.hasOwnProperty.call(options, 'discloseIdentity')) return false;
+  if (typeof options.discloseIdentity !== 'boolean') {
+    throw new TypeError('profile-dump: discloseIdentity must be a boolean');
+  }
+  return options.discloseIdentity;
 }
 
 /**
  * Summarize one dump document.
  *
  * @param {string} text Decoded UTF-8 document text.
+ * @param {{discloseIdentity?: boolean}} [options] `discloseIdentity` copies each row's literal
+ *   `id` and `name` text into the summary. It is off by default, it never copies a config value,
+ *   and an unknown option key is refused rather than ignored.
  * @returns {{ok: boolean, summary: object, entryDiagnostics: number}} `ok` is false for every
  *   refusal; `entryDiagnostics` counts entry-level problems found, including any that did not fit
  *   in the diagnostics list.
- * @throws {TypeError} When `text` is not a string. The message is fixed and never echoes the
- *   argument.
+ * @throws {TypeError} When `text` is not a string or `options` is not an object of the declared
+ *   shape. Every message is fixed and never echoes the argument.
  */
-export function summarizeProfileDumpText(text) {
+export function summarizeProfileDumpText(text, options = {}) {
   if (typeof text !== 'string') {
     // Fixed text: the argument could be anything, including something worth not echoing.
     throw new TypeError('profile-dump: the document must be a string');
   }
+  const discloseIdentity = readDisclosureOption(options);
   // Always measured here. An earlier draft accepted a caller-supplied byte count, which let a
   // caller claim 0 bytes for a 40 MiB document and walk straight past the cap.
   const bytes = Buffer.byteLength(text, 'utf8');
   const state = {
     counts: emptyCounts(),
+    discloseIdentity,
     rows: [],
     rowsTruncated: false,
     diagnostics: [],
