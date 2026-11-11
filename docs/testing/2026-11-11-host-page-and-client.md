@@ -6,9 +6,12 @@ in the Web client that frames the host route. Both were then installed into a
 live DSH web profile at the owner's request; that install is a deployment act,
 recorded here, not a compatibility claim.
 
-Runs: `20261111T124439Z-diagnostics-gui-1520708-25303` and
-`20261111T135348Z-diagnostics-gui-1525892-15553`, both `acceptance_exit=0`. The
-second round exists because the first shipped a real rendering defect (§2.5).
+Runs: `20261111T124439Z-diagnostics-gui-1520708-25303`,
+`20261111T135348Z-diagnostics-gui-1525892-15553` and
+`20261111T140112Z-diagnostics-gui-1526881-15668`, all `acceptance_exit=0`. Round 2
+exists because round 1 shipped a real rendering defect (§2.5); round 3 adds the
+next-step glosses (§2.6) and is the first round whose bytes a browser actually
+displayed (§9).
 
 ## 0. Scope and non-claims
 
@@ -109,6 +112,18 @@ The deployed bytes were checked too: the installed `page.js` imports and renders
 `profile 输入状态provided已提供结论clear无异常来源（无）条目诊断数0` in the same
 shim, so the live page and the repository agree.
 
+## 2.6 The last English fragment on the page
+
+Round 3 glossed one more thing: the **code** of each next step. Codes are a closed
+vocabulary — four sources × four outcomes plus `SOURCE_NOT_PROVIDED` — so
+`SOURCE_NOT_PROVIDED` now prints beside 未提供该来源的文档. The sentence that follows
+each code is the envelope's own English text (`NEXT_STEP_TEXT` in the analyzer) and
+is still printed **verbatim**: it is evidence, not a label, so translating it would
+mean editing what the envelope said.
+
+The render test asserts both halves at once: the gloss appears next to the code,
+and the original English sentence survives unchanged.
+
 ## 3. The rounds
 
 | Field | Round 1 | Round 2 |
@@ -123,9 +138,10 @@ shim, so the live page and the repository agree.
 | `memory_peak` | `53972992` B | `59092992` B |
 | `pids_peak` | `27` | `27` |
 | terminal | `terminal_ok=yes`, `confirmation=settled` | same |
+| round 3 | `20261111T140112Z-diagnostics-gui-1526881-15668` — `22/22`, `memory_peak=50728960` B, `pids_peak=27`, both diffs empty | |
 
-Round 2 differs from round 1 in exactly two selected inputs — `src/page.js` and
-`tests/gui.test.js` — which is the defect and its test.
+Each round differs from the one before it in exactly two selected inputs —
+`src/page.js` and `tests/gui.test.js` — which is the change and its test.
 
 ## 4. What the six new tests pin
 
@@ -203,10 +219,12 @@ b46610d4eddfb4b77e485e74f10a403d7c2b210a8c24791c0aa90a5ad30c212e  packages/host/
 d655157e0ab063926c72b8bade9408d89da5b6cc3fba46401bfd1545351ddfa5  packages/host/src/envelope.js
 a3df2c1198678c8e5e92ec5138fb0ff962b3851a15b59d4299ada8ac588b95c1  packages/host/src/page.js   (round 1)
 7269fc785b4481ffe018faad52e09660ebffdeda59ba6f15a20e1749da405f37  packages/host/src/page.js   (round 2, after the fix)
+545ddcb4de24c711401616e6cc9888aa125f27f1a1ecec52d8a1e507d5739db8  packages/host/src/page.js   (round 3, next-step glosses)
 32f19d6b12df7d415580d5e79fe9285dc5641939e9f321d8edaffd32d232f3ff  packages/host/src/client.js
 2e6a2bd19aa74be7ff2368dad611dfa8389bba44748bc8bc4ed91d296cdec253  packages/host/tests/client.test.js
 8fea71d49dc54f89bfe3dcc479f2e7a0c237bc3a3e2c226d02b042e7c32e8745  packages/host/tests/gui.test.js   (round 1)
 72f96609d8d566bf27d47921824669b96c03beb09875265cf76afed9cb8f49c4  packages/host/tests/gui.test.js   (round 2)
+ef4ae321abca22afd87ca3f5ee91989a110a82faa54d2b96ecc3ef9bffa9c6b1  packages/host/tests/gui.test.js   (round 3)
 ```
 
 Control sources at run time: `scripts/diagnostics-gui-run/run.sh`
@@ -222,3 +240,18 @@ bash /root/dsh-ecosystem-spec/projects/dsh-compat-platform/scripts/diagnostics-g
 
 Absolute path required: the shared core refuses a relative entry with `77` before
 creating a run directory.
+
+## 9. Browser confirmation (human observation, not batch evidence)
+
+On 2026-11-11 the owner opened **Settings → 兼容性诊断** in the live profile and
+reported what it showed. That is the first confirmation that the browser half
+works end to end, and it is recorded as a human observation only:
+
+- the section exists in Settings and its label is 兼容性诊断;
+- the framed host page renders in Chinese: 信封信息, 各来源通道, 各来源的基线,
+  限制（完整清单）, 后续步骤 all present as headings;
+- glosses render beside their machine words — `provided 已提供`, `clear 无异常`,
+  `not-reflected 未反映`, `not-provided 未提供` — and no cell shows
+  `[object HTMLSpanElement]` after the §2.5 fix;
+- `no browser run is claimed by any batch`: no automated round opened a browser,
+  took a screenshot, or asserted on a rendered DOM beyond the inline-script shim.

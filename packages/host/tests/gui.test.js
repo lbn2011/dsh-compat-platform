@@ -395,7 +395,13 @@ test('the inline script prints words and glosses, never a DOM node as text', asy
     combinedReport: null,
     provenance: [],
     limitations: [],
-    nextSteps: [],
+    nextSteps: [
+      {
+        code: 'SOURCE_NOT_PROVIDED',
+        source: 'static',
+        message: 'No file was named for this source; the envelope says nothing about it.',
+      },
+    ],
   }
   const fetchStub = () =>
     Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(envelope)) })
@@ -416,4 +422,11 @@ test('the inline script prints words and glosses, never a DOM node as text', asy
   assert.match(rendered, /provided\s*已提供/)
   assert.match(rendered, /clear\s*无异常/)
   assert.match(rendered, /认证\s*false/)
+  // A next step keeps the envelope's own sentence verbatim and glosses only the
+  // code, which is a closed word; the sentence is not ours to translate.
+  assert.match(rendered, /SOURCE_NOT_PROVIDED\s*未提供该来源的文档/)
+  assert.ok(
+    rendered.includes('No file was named for this source; the envelope says nothing about it.'),
+    'the envelope sentence survives verbatim',
+  )
 })

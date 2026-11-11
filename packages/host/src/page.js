@@ -240,6 +240,29 @@ footer .wrap { max-width: 62rem; margin: 0 auto; }
   // Only these get colour, and none of them means success.
   var OUTCOME_TONE = { attention: 'warn', invalid: 'bad', error: 'bad' };
 
+  // Next-step codes are a closed set: one per source and outcome, plus the
+  // absent case. The sentence beside each code is the envelope's own English
+  // text and is printed verbatim — only the code is glossed.
+  var NEXT_STEP_WORDS = {
+    SOURCE_NOT_PROVIDED: '未提供该来源的文档',
+    PROFILE_ATTENTION: 'profile 输入需注意',
+    PROFILE_INVALID: 'profile 输入无效',
+    PROFILE_ERROR: 'profile 输入出错',
+    PROFILE_UNKNOWN: 'profile 输入结果未知',
+    STATIC_ATTENTION: 'static 输入需注意',
+    STATIC_INVALID: 'static 输入无效',
+    STATIC_ERROR: 'static 输入出错',
+    STATIC_UNKNOWN: 'static 输入结果未知',
+    RUNTIME_ATTENTION: 'runtime 输入需注意',
+    RUNTIME_INVALID: 'runtime 输入无效',
+    RUNTIME_ERROR: 'runtime 输入出错',
+    RUNTIME_UNKNOWN: 'runtime 输入结果未知',
+    ADMISSION_ATTENTION: 'admission 输入需注意',
+    ADMISSION_INVALID: 'admission 输入无效',
+    ADMISSION_ERROR: 'admission 输入出错',
+    ADMISSION_UNKNOWN: 'admission 输入结果未知'
+  };
+
   // Text goes in as text, always — except when the caller hands over an element
   // it has already built. A node assigned to textContent stringifies to
   // "[object HTMLSpanElement]", so a node has to be appended instead.
@@ -416,10 +439,11 @@ footer .wrap { max-width: 62rem; margin: 0 auto; }
     } else {
       for (var k = 0; k < steps.length; k += 1) {
         var step = steps[k] || {};
-        var line = String(step.code || '（无代码）');
-        if (step.source) line += ' · ' + String(step.source);
-        if (step.message) line += ' — ' + String(step.message);
-        nextSteps.appendChild(el('li', null, line));
+        var item = el('li');
+        item.appendChild(wordCell(step.code || '（无代码）', NEXT_STEP_WORDS));
+        if (step.source) item.appendChild(el('span', 'badge', String(step.source)));
+        if (step.message) item.appendChild(el('span', 'muted', ' — ' + String(step.message)));
+        nextSteps.appendChild(item);
       }
     }
   }
