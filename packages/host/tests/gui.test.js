@@ -336,3 +336,84 @@ test('the shape gate names the first failing top-level field', () => {
   )
   assert.deepEqual(checkEnvelopeShape(clearEnvelope()), null)
 })
+
+test('the inline script prints words and glosses, never a DOM node as text', async () => {
+  // Regression: the renderer once handed an already-built <span> to a helper that
+  // assigned its argument to `textContent`, so the state and outcome cells showed
+  // "[object HTMLSpanElement]". Only a rendered page reveals that, so this test
+  // executes the shipped inline script inside a minimal DOM and reads the result.
+  const { renderPage } = await import('../src/page.js')
+  const vm = await import('node:vm')
+  const html = renderPage()
+  const script = /<script>([\s\S]*)<\/script>/.exec(html)
+  assert.ok(script, 'the page carries exactly one inline script')
+
+  const makeNode = (tag) => {
+    const node = {
+      tagName: tag,
+      className: '',
+      children: [],
+      text: null,
+      appendChild(child) {
+        node.children.push(child)
+        node.text = null
+        return child
+      },
+      replaceChildren(...kids) {
+        node.children = kids
+        node.text = null
+      },
+      get lastChild() {
+        return node.children[node.children.length - 1]
+      },
+      get textContent() {
+        if (node.children.length > 0) return node.children.map((child) => child.textContent).join('')
+        return node.text === null ? '' : node.text
+      },
+      set textContent(value) {
+        node.text = String(value)
+        node.children = []
+      },
+    }
+    Object.defineProperty(node, 'nodeType', { value: 1 })
+    return node
+  }
+
+  const byId = new Map()
+  const document = {
+    createElement: (tag) => makeNode(tag),
+    getElementById: (id) => {
+      if (!byId.has(id)) byId.set(id, makeNode('div'))
+      return byId.get(id)
+    },
+  }
+  const envelope = {
+    diagnoseVersion: 'dsh-compat-diagnose/0.2-draft.1',
+    certification: false,
+    correlation: 'not-established',
+    profile: { state: 'provided', outcome: 'clear', issues: [], entryDiagnostics: 0 },
+    combinedReport: null,
+    provenance: [],
+    limitations: [],
+    nextSteps: [],
+  }
+  const fetchStub = () =>
+    Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(envelope)) })
+
+  vm.runInNewContext(script[1], { document, fetch: fetchStub, JSON, Object, Array, String, Error })
+  await new Promise((resolve) => setTimeout(resolve, 20))
+
+  const seen = []
+  const walk = (node) => {
+    seen.push(node.textContent)
+    for (const child of node.children) walk(child)
+  }
+  for (const node of byId.values()) walk(node)
+  const rendered = seen.join('\n')
+
+  assert.doesNotMatch(rendered, /\[object HTML/)
+  // The machine word stays beside its gloss; the gloss never replaces it.
+  assert.match(rendered, /provided\s*已提供/)
+  assert.match(rendered, /clear\s*无异常/)
+  assert.match(rendered, /认证\s*false/)
+})

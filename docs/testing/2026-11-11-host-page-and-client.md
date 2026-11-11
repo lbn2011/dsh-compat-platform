@@ -1,13 +1,14 @@
 # The Chinese page and the browser half (2026-11-11)
 
-Status: **EXECUTED.** One bounded round on 2026-11-11, green. The page was
+Status: **EXECUTED.** Two bounded rounds on 2026-11-11, both green. The page was
 rewritten in Chinese and the package gained a browser half — a `settings.section`
 in the Web client that frames the host route. Both were then installed into a
 live DSH web profile at the owner's request; that install is a deployment act,
 recorded here, not a compatibility claim.
 
-Run: `20261111T124439Z-diagnostics-gui-1520708-25303`
-(`acceptance_exit=0`).
+Runs: `20261111T124439Z-diagnostics-gui-1520708-25303` and
+`20261111T135348Z-diagnostics-gui-1525892-15553`, both `acceptance_exit=0`. The
+second round exists because the first shipped a real rendering defect (§2.5).
 
 ## 0. Scope and non-claims
 
@@ -80,22 +81,53 @@ Also established while reading: the module graph orders rows by
 edge rather than failing — so a wrong name here degrades silently, which is
 exactly why it had to be checked rather than assumed.
 
-## 3. The round
+## 2.5 A rendering defect that the suite could not see
 
-| Field | Value |
-|---|---|
-| run | `20261111T124439Z-diagnostics-gui-1520708-25303` |
-| `acceptance_exit` | `0` |
-| test file | `tests/client.test.js tests/gui.test.js` |
-| TAP | `tests=21 pass=21 fail=0` |
-| `test_verdict` | `pass` |
-| selection | 17 inputs, `selected-diff.txt` empty |
-| control | `control-diff.txt` empty |
-| `memory_peak` | `53972992` B |
-| `pids_peak` | `27` |
-| terminal | `terminal_ok=yes`, `confirmation=settled` |
+The first install of the Chinese page printed `[object HTMLSpanElement]` where
+the state and outcome values belong. The owner found it by looking at the live
+panel; the batch was green, because no test had ever executed the page's inline
+script.
 
-## 4. What the five new tests pin
+- **Cause.** `pairValue()` builds a `<span>` (word plus gloss). Two call sites
+  handed that element to `el(tag, className, text)`, whose third argument was
+  assigned to `textContent`, stringifying the node.
+- **Fix.** `el()` now distinguishes the two cases: a value with a numeric
+  `nodeType` is appended as a child, everything else still goes through
+  `textContent`. Text handling stays text-only, so an evidence document still
+  cannot become markup.
+- **Why the fix is not just "one more String()".** Appending keeps the gloss as a
+  real element with its own styling, which is the whole point of printing a
+  Chinese gloss beside a machine word.
+- **Regression test.** `tests/gui.test.js` now extracts the shipped inline script,
+  runs it inside a minimal DOM (`createElement`, `appendChild`, `textContent`,
+  `replaceChildren`, `lastChild`) with a stubbed `fetch`, and asserts that no
+  rendered node contains `[object HTML`, that `provided` still sits beside `已提供`,
+  and that `认证 false` renders as a pair. Verified against the old code: that test
+  fails on it (16/17, one failure) and passes on the fix (22/22).
+
+The deployed bytes were checked too: the installed `page.js` imports and renders
+`profile 输入状态provided已提供结论clear无异常来源（无）条目诊断数0` in the same
+shim, so the live page and the repository agree.
+
+## 3. The rounds
+
+| Field | Round 1 | Round 2 |
+|---|---|---|
+| run | `20261111T124439Z-diagnostics-gui-1520708-25303` | `20261111T135348Z-diagnostics-gui-1525892-15553` |
+| `acceptance_exit` | `0` | `0` |
+| test file | `tests/client.test.js tests/gui.test.js` | same |
+| TAP | `tests=21 pass=21 fail=0` | `tests=22 pass=22 fail=0` |
+| `test_verdict` | `pass` | `pass` |
+| selection | 17 inputs, `selected-diff.txt` empty | same set, `selected-diff.txt` empty |
+| control | `control-diff.txt` empty | `control-diff.txt` empty |
+| `memory_peak` | `53972992` B | `59092992` B |
+| `pids_peak` | `27` | `27` |
+| terminal | `terminal_ok=yes`, `confirmation=settled` | same |
+
+Round 2 differs from round 1 in exactly two selected inputs — `src/page.js` and
+`tests/gui.test.js` — which is the defect and its test.
+
+## 4. What the six new tests pin
 
 1. The bundle registers under the package name, in the loader shape, and the
    manifest advertises `dsh.client.platform = 'web'` plus `exports['./client']`.
@@ -107,6 +139,8 @@ exactly why it had to be checked rather than assumed.
    `referrerPolicy: 'no-referrer'`.
 5. The source contains no `fetch(`, `XMLHttpRequest`, `WebSocket`, `EventSource`,
    `child_process`, `spawn`, `readFileSync`, `eval(` or `new Function(`.
+
+6. The inline script renders words and glosses, never a DOM node as text (§2.5).
 
 Test 5 is the load-bearing one: a framed page needs no data plumbing of its own,
 so any such primitive appearing here would mean the panel had started rendering a
@@ -152,8 +186,14 @@ bounded run.
    envelope, because they mutate a running service and a shared web server
    configuration. They are deployment steps, deliberately not folded into a green
    batch.
-5. `page.js` was repacked and reinstalled twice (once for the Chinese rewrite,
-   once for the client half); the batch ran against the final bytes only.
+5. `page.js` was repacked and reinstalled three times (the Chinese rewrite, the
+   client half, and the rendering fix); each batch round ran against the bytes it
+   names, and round 1's figures are kept as they were measured rather than
+   restated.
+6. Round 1 shipped a real rendering defect that the suite could not detect. It was
+   found by the owner looking at the live panel — not by this batch, and not by any
+   test that existed at the time. The regression test added for it is the first
+   test in this package that executes the page script at all.
 
 ## 7. Selected-input hashes at run time
 
@@ -161,10 +201,12 @@ bounded run.
 f21ccbd244b5738bff32f05aca8941570f3aacdf2b7aa87958209b756d378f20  packages/host/package.json
 b46610d4eddfb4b77e485e74f10a403d7c2b210a8c24791c0aa90a5ad30c212e  packages/host/src/index.js
 d655157e0ab063926c72b8bade9408d89da5b6cc3fba46401bfd1545351ddfa5  packages/host/src/envelope.js
-a3df2c1198678c8e5e92ec5138fb0ff962b3851a15b59d4299ada8ac588b95c1  packages/host/src/page.js
+a3df2c1198678c8e5e92ec5138fb0ff962b3851a15b59d4299ada8ac588b95c1  packages/host/src/page.js   (round 1)
+7269fc785b4481ffe018faad52e09660ebffdeda59ba6f15a20e1749da405f37  packages/host/src/page.js   (round 2, after the fix)
 32f19d6b12df7d415580d5e79fe9285dc5641939e9f321d8edaffd32d232f3ff  packages/host/src/client.js
 2e6a2bd19aa74be7ff2368dad611dfa8389bba44748bc8bc4ed91d296cdec253  packages/host/tests/client.test.js
-8fea71d49dc54f89bfe3dcc479f2e7a0c237bc3a3e2c226d02b042e7c32e8745  packages/host/tests/gui.test.js
+8fea71d49dc54f89bfe3dcc479f2e7a0c237bc3a3e2c226d02b042e7c32e8745  packages/host/tests/gui.test.js   (round 1)
+72f96609d8d566bf27d47921824669b96c03beb09875265cf76afed9cb8f49c4  packages/host/tests/gui.test.js   (round 2)
 ```
 
 Control sources at run time: `scripts/diagnostics-gui-run/run.sh`

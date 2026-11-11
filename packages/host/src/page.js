@@ -240,10 +240,19 @@ footer .wrap { max-width: 62rem; margin: 0 auto; }
   // Only these get colour, and none of them means success.
   var OUTCOME_TONE = { attention: 'warn', invalid: 'bad', error: 'bad' };
 
-  function el(tag, className, text) {
+  // Text goes in as text, always — except when the caller hands over an element
+  // it has already built. A node assigned to textContent stringifies to
+  // "[object HTMLSpanElement]", so a node has to be appended instead.
+  function el(tag, className, content) {
     var node = document.createElement(tag);
     if (className) node.className = className;
-    if (text !== undefined && text !== null) node.textContent = String(text);
+    if (content !== undefined && content !== null) {
+      if (typeof content === 'object' && typeof content.nodeType === 'number') {
+        node.appendChild(content);
+      } else {
+        node.textContent = String(content);
+      }
+    }
     return node;
   }
 

@@ -6,7 +6,8 @@ reads exactly one configured file per request, and writes nothing.
 
 Status: **EXECUTED** — earlier rounds on 2026-11-08 (second green, 15/15 tests,
 seven HTTP assertions) and a later bounded round on 2026-11-11 covering the
-Chinese page and the browser half (21/21 tests, hashes identical).
+Chinese page and the browser half (22/22 tests, hashes identical; the round before
+it caught a rendering defect the suite could not — see the record's §2.5).
 Records: [`docs/testing/2026-11-08-read-only-diagnostics-gui.md`](../../docs/testing/2026-11-08-read-only-diagnostics-gui.md)
 and [`docs/testing/2026-11-11-host-page-and-client.md`](../../docs/testing/2026-11-11-host-page-and-client.md).
 Design: [`docs/requirements-and-design/2026-11-08-read-only-diagnostics-gui-design.md`](../../docs/requirements-and-design/2026-11-08-read-only-diagnostics-gui-design.md).
@@ -90,9 +91,11 @@ absolute origin, touches no process API, and prints `certification: false` and
 node --test --test-concurrency=1 "tests/*.test.js"
 ```
 
-21 tests, no dependencies: a fake carrier records the two registrations, the
-real handlers run against real files written into `mkdtemp`, and the browser half
-is executed inside a stand-in module loader to check what it registers. They do
+22 tests, no dependencies: a fake carrier records the two registrations, the
+real handlers run against real files written into `mkdtemp`, the browser half is
+executed inside a stand-in module loader to check what it registers, and the page's
+own inline script runs inside a minimal DOM so a node stringified into
+`textContent` fails a test instead of reaching a reader. They do
 **not** boot the carrier, listen on a socket, run a browser, or render anything —
 that is the batch's job and the record's non-claim.
 
