@@ -11,12 +11,21 @@
     ".": "./src/index.js",
     "./page": "./src/page.js",
     "./envelope": "./src/envelope.js",
+    "./client": "./src/client.js",
     "./package.json": "./package.json"
   },
   "files": [
     "src/",
     "README.md"
   ],
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
   "scripts": {
     "test": "node --test --test-concurrency=1 \"tests/*.test.js\""
   },

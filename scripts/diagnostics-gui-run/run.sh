@@ -64,6 +64,7 @@ set -uo pipefail
   # The single workload file the static contract requires to be present in the
   # suite's glob. This file is the subject of the batch.
   TEST_FILES=(
+    tests/client.test.js
     tests/gui.test.js
   )
   # SELECTED INPUTS. Everything the verdict depends on and that lives in THIS repo
@@ -79,6 +80,7 @@ set -uo pipefail
     "$HOSTPKG/src/index.js"
     "$HOSTPKG/src/envelope.js"
     "$HOSTPKG/src/page.js"
+    "$HOSTPKG/src/client.js"
     "$PKG/package.json"
     "$PKG/src/diagnose-cli.js"
     "$PKG/src/diagnose-internal.js"

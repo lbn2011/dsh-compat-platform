@@ -4,9 +4,11 @@ A **host plugin** that serves one read-only view of an existing diagnostic
 envelope on the composition's own `webServer` service. It analyses nothing,
 reads exactly one configured file per request, and writes nothing.
 
-Status: **EXECUTED** — two bounded rounds on 2026-11-08, second green
-(15/15 package tests, seven HTTP assertions).
-Record: [`docs/testing/2026-11-08-read-only-diagnostics-gui.md`](../../docs/testing/2026-11-08-read-only-diagnostics-gui.md).
+Status: **EXECUTED** — earlier rounds on 2026-11-08 (second green, 15/15 tests,
+seven HTTP assertions) and a later bounded round on 2026-11-11 covering the
+Chinese page and the browser half (21/21 tests, hashes identical).
+Records: [`docs/testing/2026-11-08-read-only-diagnostics-gui.md`](../../docs/testing/2026-11-08-read-only-diagnostics-gui.md)
+and [`docs/testing/2026-11-11-host-page-and-client.md`](../../docs/testing/2026-11-11-host-page-and-client.md).
 Design: [`docs/requirements-and-design/2026-11-08-read-only-diagnostics-gui-design.md`](../../docs/requirements-and-design/2026-11-08-read-only-diagnostics-gui-design.md).
 
 ## What it is not
@@ -88,10 +90,28 @@ absolute origin, touches no process API, and prints `certification: false` and
 node --test --test-concurrency=1 "tests/*.test.js"
 ```
 
-16 tests, no dependencies: a fake carrier records the two registrations, and the
-real handlers run against real files written into `mkdtemp`. They do **not** boot
-the carrier, listen on a socket, or render the page in a browser — that is the
-batch's job and the record's non-claim.
+21 tests, no dependencies: a fake carrier records the two registrations, the
+real handlers run against real files written into `mkdtemp`, and the browser half
+is executed inside a stand-in module loader to check what it registers. They do
+**not** boot the carrier, listen on a socket, run a browser, or render anything —
+that is the batch's job and the record's non-claim.
+
+## The browser half
+
+`src/client.js` is the same package's contribution to the Web client's module
+graph: one `settings.section` that frames `/compat-diagnostics` in an `<iframe>`.
+It is hand-written in the loader format this installation uses
+(`window.__ModuleLoader__.load({ id, factory })`) — no build step, so the shipped
+bytes are the executed bytes. It declares no remote API, registers no command,
+writes nothing and reads no file; if the host route refuses, the frame shows that
+refusal.
+
+Two facts were established by reading the installed client bundles rather than
+assuming: the settings slot is `settings.section` (there is no
+`settings.plugins.tab`), and the `slots` client service comes from the core
+client runtime, not from a plugin package — so the manifest's
+`dsh.client.inject` names only `@deepseek-ai/dsh-client-ui-settings`, the one
+client package that really provides the slot.
 
 ## Limits, stated so they cannot be misread
 

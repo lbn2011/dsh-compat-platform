@@ -177,7 +177,9 @@ test('the page route serves HTML that states the two literals before any data', 
   assert.match(html, /certification: false/)
   assert.match(html, /correlation: not-established/)
   assert.match(html, new RegExp(DEFAULT_ENVELOPE_PATH.replace('/', '\\/')))
-  assert.match(html, /compatibility, loadability or certification result/)
+  // 2026-11-11: the page prose was translated to Chinese for this installation's
+  // operator. The literals and codes stay verbatim; only the prose moved.
+  assert.match(html, /\u4e0d\u5f97\u88ab\u5f15\u7528\u4e3a\u517c\u5bb9\u6027\u3001\u53ef\u52a0\u8f7d\u6027\u6216\u8ba4\u8bc1\u7ed3\u8bba/)
   // The page must not re-run analysis or embed a second data source.
   assert.doesNotMatch(html, /child_process|spawn|execFile/)
 })
@@ -191,12 +193,12 @@ test('the page carries a baseline section and explains every word it may print',
   const html = bodyText(state)
   // Static furniture: the heading and the sentence that stops "not-reflected" from
   // being read as "this document had no baseline".
-  assert.match(html, /Baseline per source/)
-  assert.match(html, /never means the document had none/)
+  assert.match(html, /\u5404\u6765\u6e90\u7684\u57fa\u7ebf/)
+  assert.match(html, /\u8fd9\u7edd\u4e0d\u8868\u793a\u90a3\u4efd\u6587\u6863\u6ca1\u6709\u57fa\u7ebf/)
   // The two other words a one-source envelope cannot show are explained too, so a
   // reader who never opens the JSON still learns what each word excludes.
-  assert.match(html, /no document was named for this source/)
-  assert.match(html, /produced no usable result/)
+  assert.match(html, /\u6b64\u6765\u6e90\u672a\u6307\u5b9a\u4efb\u4f55\u6587\u6863/)
+  assert.match(html, /\u6587\u6863\u5df2\u6307\u5b9a\uff0c\u4f46\u672a\u4ea7\u51fa\u53ef\u7528\u7ed3\u679c/)
 })
 
 test('both routes refuse methods other than GET and HEAD', async (t) => {

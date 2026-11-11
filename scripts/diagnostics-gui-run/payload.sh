@@ -57,7 +57,13 @@ BOOT=$SLICE/boot.mjs
 PROBE=$SLICE/probe.mjs
 WORKDIR=$REPO
 EXPECT_YAML_VERSION='2.9.1'
-EXPECT_SELECTED_TEST='tests/gui.test.js'
+# Both files in the package's own glob: the page route suite and the browser
+# half's contribution suite. A batch that ran only one of them would report a
+# pass for bytes it never executed.
+EXPECT_SELECTED_TESTS=(
+  tests/client.test.js
+  tests/gui.test.js
+)
 EXPECT_ENVELOPE_EXIT=1          # profile+static+runtime+admission, admission attention
 EXPECT_FORBIDDEN_PORT=3080      # production GUI port: never this batch's port
 EXPECT_MIN_TESTS=15
@@ -152,7 +158,8 @@ diagnostics_gui_payload() {
     "$HOSTPKG/src/index.js"
     "$HOSTPKG/src/envelope.js"
     "$HOSTPKG/src/page.js"
-    "$HOSTPKG/$EXPECT_SELECTED_TEST"
+    "$HOSTPKG/${EXPECT_SELECTED_TESTS[0]}"
+    "$HOSTPKG/${EXPECT_SELECTED_TESTS[1]}"
     "$BOOT"
     "$PROBE"
   )
@@ -231,7 +238,7 @@ check('page-html-no-process-api', !/child_process|spawn\(|execFile/.test(html), 
 
 // The test file the batch runs must be the one the package's own glob selects.
 const discovered = readdirSync(join(pkgDir, 'tests')).filter((name) => name.endsWith('.test.js')).sort();
-check('test-discovery', JSON.stringify(discovered) === JSON.stringify(['gui.test.js']), JSON.stringify(discovered));
+check('test-discovery', JSON.stringify(discovered) === JSON.stringify(['client.test.js', 'gui.test.js']), JSON.stringify(discovered));
 
 console.log(JSON.stringify({ verdict: failures.length === 0 ? 'pass' : 'fail', failures, facts }, null, 2));
 process.exit(failures.length === 0 ? 0 : 1);
@@ -535,7 +542,7 @@ DEPS
       --chdir "$HOSTPKG" \
       -- /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp \
          NODE_OPTIONS=--max-old-space-size=192 \
-         "$NODE" --test --test-concurrency=1 "$EXPECT_SELECTED_TEST" \
+         "$NODE" --test --test-concurrency=1 "${EXPECT_SELECTED_TESTS[@]}" \
       > "$test_dir/stdout.tap" 2> "$test_dir/stderr.txt"
     local test_rc=$?
     br_record "$test_dir/exit.txt" '%s\n' "$test_rc" || :
@@ -568,7 +575,7 @@ DEPS
     fi
     br_record "$test_dir/summary.txt" \
       'test_file=%s\ncwd=%s\nexit=%s\ntap_tests=%s\ntap_pass=%s\ntap_fail=%s\n' \
-      "$EXPECT_SELECTED_TEST" "$HOSTPKG" "$test_rc" \
+      "${EXPECT_SELECTED_TESTS[*]}" "$HOSTPKG" "$test_rc" \
       "${tap_tests:-unparsed}" "${tap_pass:-unparsed}" "${tap_fail:-unparsed}" || :
     test_verdict=fail
     if [ "$tap_rc" -eq 0 ] && br_uint "$tap_tests" && [ "$tap_tests" -ge "$EXPECT_MIN_TESTS" ]; then
