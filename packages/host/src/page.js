@@ -24,6 +24,12 @@
  * operator of this installation. Every machine word (state, outcome, baseline
  * state, limitation code, issue code) is printed verbatim next to its Chinese
  * gloss, so a translated label can never be mistaken for the value itself.
+ *
+ * DESIGN: unified design tokens — 5-layer surface tonal ladder tinted toward
+ * cyan, fluid clamp() typography, grid-first layout, fully-rounded geometry
+ * (999px pills, 50% circles). Dark-first; light mode via prefers-color-scheme.
+ * Colour is used only to separate a refusal from an absence, never to claim
+ * "fine" or invent a certification result this envelope does not contain.
  */
 
 /** Content type of the page response. */
@@ -43,127 +49,161 @@ export function renderPage() {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'none'; form-action 'none'; base-uri 'none'">
 <title>兼容性诊断 · 只读</title>
 <style>
+/* ── design tokens ─────────────────────────────────────────── */
 :root {
   color-scheme: light dark;
-  --bg: #f6f7fb;
-  --surface: #ffffff;
-  --ink: #1b1b20;
-  --ink-soft: #5a5a68;
-  --ink-faint: #8a8a99;
-  --line: #e2e3ec;
-  --accent: #3b5bdb;
-  --warn: #b08419;
-  --warn-bg: #fdf6e3;
-  --bad: #b02a2a;
-  --bad-bg: #fdeeee;
-  --shadow: 0 1px 2px rgba(20, 20, 40, 0.05), 0 6px 18px rgba(20, 20, 40, 0.05);
+  /* 5-layer surface tonal ladder (dark-first, cyan-tinted) */
+  --surface-0: #05070C;
+  --surface-1: #0A0D12;
+  --surface-2: #0F131C;
+  --surface-3: #161D2B;
+  --surface-4: #1E2636;
+  /* ink */
+  --ink: #e8e8f0;
+  --ink-soft: #a8a8bb;
+  --ink-faint: #767688;
+  --line: #2b2b36;
+  /* luminous accent — high-saturation cyan */
+  --accent: #38BDF8;
+  --accent-dim: #1e7a9f;
+  --accent-glow: rgba(56,189,248,0.12);
+  /* semantic states */
+  --warn: #e0b850;
+  --warn-bg: #302916;
+  --bad: #ff8b8b;
+  --bad-bg: #331c1c;
+  --good: #6EE7B7;
+  --good-bg: #1a3328;
+  /* shadows */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.35);
+  --shadow-md: 0 2px 8px rgba(0,0,0,.45), 0 1px 2px rgba(0,0,0,.3);
+  /* spacing */
+  --sp-xs:.25rem; --sp-sm:.5rem; --sp-md:1rem; --sp-lg:1.5rem; --sp-xl:2rem;
+  /* radius */
+  --r-sm:4px; --r-md:8px; --r-lg:12px; --r-full:999px;
+  /* type scale (fluid) */
+  --tx-xs: clamp(.72rem,.7rem + .1vw,.78rem);
+  --tx-sm: clamp(.82rem,.8rem + .1vw,.9rem);
+  --tx-base: clamp(.95rem,.93rem + .1vw,1rem);
+  --tx-lg: clamp(1.1rem,1.05rem + .25vw,1.25rem);
+  --tx-xl: clamp(1.35rem,1.25rem + .5vw,1.75rem);
 }
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme: light) {
   :root {
-    --bg: #131318;
-    --surface: #1b1b22;
-    --ink: #e8e8f0;
-    --ink-soft: #a8a8bb;
-    --ink-faint: #767688;
-    --line: #2b2b36;
-    --accent: #8fa6ff;
-    --warn: #e0b850;
-    --warn-bg: #302916;
-    --bad: #ff8b8b;
-    --bad-bg: #331c1c;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.3);
+    --surface-0:#fafbfc; --surface-1:#f6f7fb;
+    --surface-2:#ffffff; --surface-3:#f1f2f6; --surface-4:#e8e9ef;
+    --ink:#1b1b20; --ink-soft:#5a5a68; --ink-faint:#8a8a99; --line:#e2e3ec;
+    --accent:#2d93cc; --accent-dim:#5ab3e8; --accent-glow:rgba(45,147,204,.1);
+    --warn:#b08419; --warn-bg:#fdf6e3;
+    --bad:#b02a2a; --bad-bg:#fdeeee;
+    --good:#28a876; --good-bg:#e8f8f2;
+    --shadow-sm:0 1px 2px rgba(20,20,40,.05);
+    --shadow-md:0 2px 8px rgba(20,20,40,.08),0 1px 2px rgba(20,20,40,.04);
   }
 }
-* { box-sizing: border-box; }
+/* ── base ──────────────────────────────────────────────────── */
+*{box-sizing:border-box;}
 body {
-  margin: 0;
-  padding: 2rem 1.5rem 7rem;
-  background: var(--bg);
-  color: var(--ink);
-  font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC",
-        "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  -webkit-font-smoothing: antialiased;
+  margin:0; padding:var(--sp-xl) var(--sp-lg) 7rem;
+  background:var(--surface-1); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans CJK SC",
+    "PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  font-size:var(--tx-base); line-height:1.65;
+  -webkit-font-smoothing:antialiased;
 }
-.wrap { max-width: 62rem; margin: 0 auto; }
-h1 { font-size: 1.35rem; margin: 0; letter-spacing: 0.01em; }
-h2 {
-  font-size: 0.82rem; margin: 2rem 0 0.75rem; color: var(--ink-faint);
-  font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+.wrap{max-width:66rem;margin:0 auto;}
+/* ── typography ────────────────────────────────────────────── */
+h1{font-size:var(--tx-xl);font-weight:700;letter-spacing:-.02em;margin:0;line-height:1.3;}
+h2{font-size:var(--tx-xs);font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+   color:var(--ink-faint);margin:var(--sp-xl) 0 var(--sp-sm);}
+h3{font-size:var(--tx-base);font-weight:600;margin:0 0 var(--sp-sm);}
+p{margin:var(--sp-xs) 0;}
+.muted{color:var(--ink-soft);font-size:var(--tx-sm);}
+code,pre,.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:.86em;}
+code{background:var(--surface-3);border-radius:var(--r-sm);padding:.05em .35em;}
+/* ── header ────────────────────────────────────────────────── */
+header.top{
+  padding-bottom:var(--sp-lg);
+  border-bottom:1px solid var(--line);
 }
-h3 { font-size: 0.95rem; margin: 0 0 0.55rem; font-weight: 600; }
-p { margin: 0.35rem 0; }
-.muted { color: var(--ink-soft); font-size: 0.9rem; }
-code, pre, .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.86em;
+.page-eyebrow{
+  display:inline-flex;align-items:center;gap:var(--sp-sm);
+  margin-bottom:var(--sp-sm);
+  font-size:var(--tx-xs);font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--accent);
 }
-code { background: var(--line); border-radius: 3px; padding: 0.05em 0.35em; }
-header.top { padding-bottom: 1rem; border-bottom: 1px solid var(--line); }
-.claim {
-  margin: 1.1rem 0 0;
-  padding: 0.9rem 1rem;
-  border-left: 3px solid var(--warn);
-  border-radius: 6px;
-  background: var(--warn-bg);
-  color: var(--ink);
+.page-eyebrow::before{
+  content:"";display:block;width:1.5rem;height:2px;
+  background:var(--accent);border-radius:var(--r-full);
 }
-.claim strong { display: block; margin-bottom: 0.25rem; }
-.claim .literals { color: var(--ink-soft); font-size: 0.86rem; }
-.panel {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 1rem 1.1rem;
-  box-shadow: var(--shadow);
+.claim{
+  margin:var(--sp-lg) 0 0;padding:var(--sp-md) var(--sp-lg);
+  border-left:3px solid var(--warn);border-radius:var(--r-md);
+  background:var(--warn-bg);color:var(--ink);
 }
-dl.rows {
-  display: grid; grid-template-columns: max-content 1fr;
-  gap: 0.3rem 1.1rem; margin: 0;
+.claim strong{display:block;margin-bottom:var(--sp-xs);}
+.claim .literals{color:var(--ink-soft);font-size:var(--tx-sm);}
+/* ── panels & cards ────────────────────────────────────────── */
+.panel{
+  background:var(--surface-2);border:1px solid var(--line);
+  border-radius:var(--r-lg);padding:var(--sp-lg) var(--sp-md);
+  box-shadow:var(--shadow-md);
 }
-dl.rows dt { color: var(--ink-soft); font-size: 0.86rem; }
-dl.rows dd { margin: 0; overflow-wrap: anywhere; }
-.grid { display: grid; gap: 0.85rem; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); }
-.card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 0.9rem 1rem;
-  box-shadow: var(--shadow);
+dl.rows{display:grid;grid-template-columns:max-content 1fr;gap:.35rem var(--sp-lg);margin:0;}
+dl.rows dt{color:var(--ink-soft);font-size:var(--tx-sm);}
+dl.rows dd{margin:0;overflow-wrap:anywhere;}
+.grid{display:grid;gap:var(--sp-md);grid-template-columns:repeat(auto-fit,minmax(20rem,1fr));}
+.card{
+  background:var(--surface-2);border:1px solid var(--line);
+  border-radius:var(--r-lg);padding:var(--sp-lg) var(--sp-md);
+  box-shadow:var(--shadow-md);
+  transition:box-shadow .15s,border-color .15s;
 }
-.card.refused { border-color: var(--bad); background: var(--bad-bg); }
-.badge {
-  display: inline-block; margin-left: 0.4rem; padding: 0 0.45rem;
-  border: 1px solid var(--line); border-radius: 999px;
-  font-size: 0.72rem; color: var(--ink-soft); vertical-align: 1px;
+.card:hover{box-shadow:var(--shadow-md),0 0 0 1px var(--accent-dim);border-color:var(--accent-dim);}
+.card.refused{border-color:var(--bad);background:var(--bad-bg);}
+.card.refused:hover{border-color:var(--bad);}
+/* ── badges ────────────────────────────────────────────────── */
+.badge{
+  display:inline-block;margin-left:var(--sp-sm);padding:0 var(--sp-sm);
+  border:1px solid var(--line);border-radius:var(--r-full);
+  font-size:var(--tx-xs);color:var(--ink-soft);vertical-align:1px;
 }
-.badge.warn { border-color: var(--warn); color: var(--warn); }
-.badge.bad { border-color: var(--bad); color: var(--bad); }
-ul.codes { list-style: none; padding: 0; margin: 0.35rem 0 0; display: flex; flex-wrap: wrap; gap: 0.35rem; }
-ul.codes > li {
-  border: 1px solid var(--line); border-radius: 4px; padding: 0.05rem 0.4rem;
-  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.78rem;
-  color: var(--ink-soft);
+.badge.warn{border-color:var(--warn);color:var(--warn);background:var(--warn-bg);}
+.badge.bad{border-color:var(--bad);color:var(--bad);background:var(--bad-bg);}
+.badge.good{border-color:var(--good);color:var(--good);background:var(--good-bg);}
+/* ── code lists & plain lists ──────────────────────────────── */
+ul.codes{list-style:none;padding:0;margin:var(--sp-xs) 0 0;display:flex;flex-wrap:wrap;gap:var(--sp-xs);}
+ul.codes>li{
+  border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:.05rem var(--sp-sm);
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:var(--tx-xs);
+  color:var(--ink-soft);
 }
-ul.plain { margin: 0; padding-left: 1.15rem; }
-ul.plain > li { margin: 0.2rem 0; }
-details { margin-top: 0.6rem; }
-summary { cursor: pointer; color: var(--ink-faint); font-size: 0.82rem; }
-pre {
-  margin: 0.45rem 0 0; padding: 0.7rem; overflow: auto; max-height: 24rem;
-  background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
-  font-size: 0.78rem; line-height: 1.5;
+ul.plain{margin:0;padding-left:var(--sp-lg);}
+ul.plain>li{margin:var(--sp-xs) 0;}
+/* ── details / summary ─────────────────────────────────────── */
+details{margin-top:var(--sp-md);}
+summary{cursor:pointer;color:var(--ink-faint);font-size:var(--tx-sm);user-select:none;}
+summary:hover{color:var(--accent);}
+pre{
+  margin:var(--sp-sm) 0 0;padding:var(--sp-md);overflow:auto;max-height:24rem;
+  background:var(--surface-0);border:1px solid var(--line);border-radius:var(--r-md);
+  font-size:var(--tx-xs);line-height:1.55;
 }
-footer {
-  position: fixed; inset: auto 0 0 0; padding: 0.7rem 1.5rem;
-  background: var(--surface); border-top: 1px solid var(--line);
-  color: var(--ink-soft); font-size: 0.78rem; z-index: 2;
+/* ── fixed footer ──────────────────────────────────────────── */
+footer{
+  position:fixed;inset:auto 0 0 0;padding:var(--sp-sm) var(--sp-lg);
+  background:var(--surface-2);border-top:1px solid var(--line);
+  color:var(--ink-soft);font-size:var(--tx-xs);z-index:100;
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
 }
-footer .wrap { max-width: 62rem; margin: 0 auto; }
+footer .wrap{max-width:66rem;margin:0 auto;}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header class="top">
+    <div class="page-eyebrow">dsh-compat-platform</div>
     <h1>兼容性诊断 · 只读</h1>
     <p class="muted">
       本页只显示一份已经存在的 <code>dsh-compat-diagnose</code> 信封文件，
