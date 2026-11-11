@@ -12,7 +12,7 @@ readonly -a BR_UNIT_FAMILIES=(
   'diagnostics-gui-*' 'profile-dump-retained-export-*' 'profile-dump-install-*'
   'package-install-*' 'trusted-extraction-batch-*' 'trusted-extraction-hang-*'
   'spec-test-batch-*'
-  'config-check-batch-*' 'second-version-baseline-*' 'second-version-observe-*'
+  'config-check-batch-*' 'second-version-baseline-*' 'second-version-observe-*' 'second-install-tree-*'
   'driver-config-contract-batch-*' 'analyzer-test-script-batch-*'
   'profile-export-real-*' 'profile-export-main-unit-*' 'profile-export-unit-*'
   'profile-export-unit-split-*' 'profile-export-orchestration-unit-split-*'
@@ -22,7 +22,7 @@ readonly -a BR_UNIT_FAMILIES=(
 )
 br_prefix_allowed() {
   case "$1" in
-    profile-dump-batch|config-check-batch|diagnose-batch|dependency-shape-batch|correspondence|correspondence-batch|repair-plan-batch|diagnose-real-wiring|diagnostics-gui|diagnostics-gui-run|profile-dump-retained-export|profile-dump-install|package-install|trusted-extraction-batch|trusted-extraction-hang|spec-test-batch|second-version-baseline|second-version-observe) return 0;;
+    profile-dump-batch|config-check-batch|diagnose-batch|dependency-shape-batch|correspondence|correspondence-batch|repair-plan-batch|diagnose-real-wiring|diagnostics-gui|diagnostics-gui-run|profile-dump-retained-export|profile-dump-install|package-install|trusted-extraction-batch|trusted-extraction-hang|spec-test-batch|second-version-baseline|second-version-observe|second-install-tree) return 0;;
     *) return 1;;
   esac
 }

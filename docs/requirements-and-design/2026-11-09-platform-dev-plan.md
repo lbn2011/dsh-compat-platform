@@ -182,6 +182,16 @@ packages (recursive `npm pack`, no lockfile, no integrity check) because assembl
 cannot describe a different runtime than the record names. And agreement on four fixture entries is
 not a compatibility claim. `docs/testing/2026-11-10-second-version-observe.md`.
 
+**Status 2026-11-11: the tree cell is measured too.** `scripts/second-install-tree` reconstructs an
+installation directory from the published `0.2.2-alpha.2` tarball plus the pinned closure and runs a
+runtime receipt over it: **ten of ten modules resolve, `unresolved=0`**, receipt bytes identical across
+two bounded rounds (`docs/testing/2026-11-11-second-install-tree.md`). What this closes is the cell
+that previously read `rows=9, unresolved=1` for the same release, where a hand-picked prefix lacked
+`cordis-plugin-group`. What it does **not** close, and the record says so: the tree is reconstructed,
+not produced by `npm install` (no lockfile, no peer resolution, no lifecycle scripts), and resolving
+an entry path is not loading it. The matrix therefore has two measured *trees* and one measured
+behavioural comparison, and still no compatibility claim.
+
 ### Blocked items
 
 - **G9 configuration mismatch** stays blocked until the D-A identity decision. The plan does not

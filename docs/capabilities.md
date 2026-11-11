@@ -35,6 +35,7 @@ or a statement about a production profile.
 | 12 | Trusted extraction (fixture-only) | (library + batch) | `trusted-extraction-receipt/0.1-draft.1` | 32/32 |
 | 13 | Read-only diagnostics GUI | (host route) | `dsh-compat-diagnose/0.2-draft.1` | 16/16 + 7 HTTP checks |
 | 14 | Packaging + publish audit | `scripts/package-install` | `publish-audit/0.1-draft.2` | 24 probes |
+| 15 | Second install tree (published older) | `scripts/second-install-tree` | `runtime-receipt/0.1-draft.1` | 10 of 10 modules resolved, 2 rounds |
 
 Test counts are **per suite and not additive**: they measure different scopes on different days.
 
@@ -84,6 +85,12 @@ a consumer directory with no sibling checkout, resolves every documented subpath
 fails loudly (`ERR_MODULE_NOT_FOUND`) when a dependency is deliberately removed. **Nothing is
 published.**
 
+**15 (second install tree).** That the published `0.2.2-alpha.2`, placed as an installation
+directory with its pinned dependency closure under it, resolves **ten of ten** modules a runtime
+receipt names — `unresolved=0`, receipt bytes identical across two rounds. The tree is
+**reconstructed**, not installed: no lockfile, no peer resolution, no lifecycle scripts. Resolving a
+path and hashing its bytes is not loading it, and this row makes no compatibility claim.
+
 ## Deliberately not built
 
 These are decisions, not omissions:
@@ -102,6 +109,7 @@ Every capability has at least one record under `docs/testing/`. The most load-be
 
 - `2026-11-10-publishable.md` — both audit standards at zero blockers.
 - `2026-11-10-second-version-observe.md` — the behavioural cell of the version matrix.
+- `2026-11-11-second-install-tree.md` — the tree cell: ten of ten modules resolve over a reconstructed `0.2.2-alpha.2`.
 - `2026-11-09-trusted-extraction.md` — phases, entry outcomes, isolation gate evidence.
 - `2026-11-09-diagnose-provenance.md` — the `0.2-draft.1` envelope.
 - `2026-11-09-profile-dump-rows.md` — the row window.
