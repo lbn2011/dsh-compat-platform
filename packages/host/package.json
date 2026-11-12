@@ -12,6 +12,9 @@
     "./page": "./src/page.js",
     "./envelope": "./src/envelope.js",
     "./client": "./src/client.js",
+    "./page-snapshot": "./src/page-snapshot.js",
+    "./frontend-log": "./src/frontend-log.js",
+    "./api": "./src/api.js",
     "./package.json": "./package.json"
   },
   "files": [

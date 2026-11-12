@@ -1,0 +1,36 @@
+{
+  "name": "dsh-compat-conflict-arbiter",
+  "version": "0.1.0-draft.1",
+  "type": "module",
+  "description": "Watches internal/status for failed plugin entries, classifies duplicate-service conflicts, and applies the declared dsh.conflicts strategy. Only report-only and disable-later are carried out; isolate is reported as needing an isolated loader.",
+  "engines": {
+    "node": ">=24.9.0"
+  },
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./classify": "./src/failure-classify.js",
+    "./policy": "./src/arbiter-policy.js",
+    "./arbiter": "./src/conflict-arbiter.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/",
+    "README.md"
+  ],
+  "dsh": {
+    "conflict-arbiter": {
+      "inject": [
+        "pluginManager"
+      ]
+    }
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 \"tests/*.test.js\""
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lbn2011/dsh-compat-platform.git"
+  }
+}

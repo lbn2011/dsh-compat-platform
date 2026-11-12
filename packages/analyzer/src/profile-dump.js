@@ -39,8 +39,13 @@ import { isAlias, isMap, isScalar, isSeq, parseAllDocuments } from 'yaml';
  * verifies a closed key set must be able to tell the two shapes apart by the version string
  * alone. The counters are unchanged; the version says "there are rows now", not "the numbers
  * moved".
+ *
+ * Bumped again to `0.4-draft.1` when `layers` and `attribution` were added: layer provenance is a
+ * new top-level fact, and a consumer that verifies a closed key set must be able to tell a summary
+ * that carries it from one that does not. Row objects also gained `layer` and `patched`. No
+ * counter changed meaning.
  */
-export const PROFILE_DUMP_SCHEMA = 'profile-dump-summary/0.3-draft.1';
+export const PROFILE_DUMP_SCHEMA = 'profile-dump-summary/0.4-draft.1';
 
 /** Fixed, non-configurable limits. Deliberately not exposed as CLI options. */
 export const PROFILE_DUMP_LIMITS = Object.freeze({
@@ -98,6 +103,21 @@ export const PROFILE_DUMP_DISCLOSURE_LIMITATIONS = Object.freeze([
   'IDENTITY_TEXT_IS_OPERATOR_TEXT_AND_MAY_CARRY_PATHS_OR_PRIVATE_NAMES',
   'IDENTITY_TEXT_IS_NOT_A_PACKAGE_IDENTITY_AND_NOT_A_VERSION',
   'CONFIG_VALUES_ARE_NEVER_EMITTED_EVEN_WHEN_IDENTITY_IS_DISCLOSED',
+]);
+
+/**
+ * Limitations added **only** to a summary whose caller asked for layer disclosure.
+ *
+ * Layer provenance is read out of the dump's own `# == ` comment lines, so it inherits every
+ * uncertainty of a comment: it says which export section a row was rendered under, not which
+ * patch instruction produced the row's current value, and it cannot say where in a patch file
+ * that instruction sits. Stated as limitations rather than left to be inferred.
+ */
+export const PROFILE_DUMP_LAYER_LIMITATIONS = Object.freeze([
+  'LAYER_LABELS_ARE_OPERATOR_TEXT_AND_MAY_CARRY_PATHS',
+  'LAYER_BOUNDARIES_COME_FROM_EXPORT_COMMENTS_NOT_FROM_PATCH_SEMANTICS',
+  'PATCH_FILE_LINE_UNKNOWN',
+  'PATCHED_FLAG_DOES_NOT_SAY_WHAT_CHANGED',
 ]);
 
 /** The one tag this command accepts without understanding: the DSH expression form. */
@@ -530,6 +550,79 @@ function unmodelledKeyCount(row) {
 }
 
 /**
+ * The separator `renderConfigDump` writes before each contiguous run of rows.
+ *
+ * `# == <origin>` for a run whose rows nobody patched, and
+ * `# == <origin>, patched by <layer>, <layer>` when one or more later layers changed a row in the
+ * run. Matched at column 0 only: a line that begins with `#` inside a block scalar is indented, so
+ * a column-0 match cannot be document content. Nothing about the text is interpreted beyond the
+ * single `, patched by ` split.
+ */
+const LAYER_SEPARATOR = /^# == (.*)$/;
+const PATCHED_BY_MARKER = ', patched by ';
+const PATCHED_BY_SEPARATOR = ', ';
+
+/**
+ * Read the export's layer separators out of its text.
+ *
+ * This is provenance the document *displays*, not provenance the loader *computed* for this
+ * summary: the labels are whatever the exporter wrote, and their order is the order of the runs in
+ * the export, which is the order the layers were applied.
+ *
+ * @param {string} text Document text, before parsing.
+ * @returns {Array<{line: number, origin: string|null, patchedBy: string[]}>} Groups in text order.
+ */
+function scanLayerGroups(text) {
+  const groups = [];
+  const lines = text.split('\n');
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = LAYER_SEPARATOR.exec(lines[index]);
+    if (match === null) continue;
+    const body = match[1];
+    const at = body.indexOf(PATCHED_BY_MARKER);
+    // A label may itself contain a comma; the exporter puts the fixed marker last, so the first
+    // occurrence is the one that separates origin from the patching layers.
+    const origin = (at === -1 ? body : body.slice(0, at)).trim();
+    const patchedBy =
+      at === -1
+        ? []
+        : body
+            .slice(at + PATCHED_BY_MARKER.length)
+            .split(PATCHED_BY_SEPARATOR)
+            .map((label) => label.trim())
+            .filter((label) => label !== '');
+    groups.push({
+      line: index + 1,
+      // Empty is treated as unknown, not as a label: an empty origin cannot be shown or matched.
+      origin: origin === '' ? null : origin,
+      patchedBy,
+    });
+  }
+  return groups;
+}
+
+/**
+ * Which group a row at `line` belongs to.
+ *
+ * The last separator *before* the row wins, because a separator introduces every row that follows
+ * it until the next one. A row above every separator has no group: the export was not produced by
+ * `renderConfigDump`, and guessing a layer would invent provenance.
+ *
+ * @param {Array<{line: number}>} groups Groups in text order.
+ * @param {number|null} line 1-based line the row starts on.
+ * @returns {number} 0-based group index, or -1 when the row precedes every separator.
+ */
+function groupIndexOf(groups, line) {
+  if (typeof line !== 'number') return -1;
+  let found = -1;
+  for (let index = 0; index < groups.length; index += 1) {
+    if (groups[index].line < line) found = index;
+    else break;
+  }
+  return found;
+}
+
+/**
  * Build one row: position, line, and closed-vocabulary shape facts only.
  *
  * This is deliberately *not* a structured declaration. It answers "what does this dump row look
@@ -540,10 +633,14 @@ function unmodelledKeyCount(row) {
  * @param {import('yaml').YAMLMap} row Entry mapping that is already known to be a mapping.
  * @param {number} index Zero-based position in the root sequence.
  * @param {number|null} line 1-based line the row starts on.
+ * @param {number|null} layer 1-based export layer the row rendered under, or null when the export
+ *   carried no separator before the row. The index is this module's own numbering of the separators
+ *   it found; it is not a layer ordinal the loader would recognise.
+ * @param {boolean} patched Whether the row's separator named at least one patching layer.
  * @param {boolean} discloseIdentity Whether this summary was asked for id/name text.
  * @returns {object} Row with a fixed key order.
  */
-function buildRow(row, index, line, discloseIdentity) {
+function buildRow(row, index, line, layer, patched, discloseIdentity) {
   const idPair = findPair(row, KEY_ID);
   const namePair = findPair(row, KEY_NAME);
   const configPair = findPair(row, KEY_CONFIG);
@@ -554,6 +651,8 @@ function buildRow(row, index, line, discloseIdentity) {
   return {
     index: index + 1,
     line,
+    layer,
+    patched,
     keyCount: row.items.length,
     idKind: textKindOf(idPair),
     nameKind: textKindOf(namePair),
@@ -610,6 +709,17 @@ function checkEntries(state, root, lineOf) {
     const groupPair = findPair(row, KEY_GROUP);
     const disabledPair = findPair(row, KEY_DISABLED);
 
+    // Position facts are also counted for rows outside the display window: `layers[].rowCount`
+    // describes the export, not the window, and a window that stopped early must not look like a
+    // short layer.
+    const rowLine = lineOf(row.range?.[0]);
+    const groupIndex = groupIndexOf(state.layerGroups, rowLine);
+    const group = groupIndex === -1 ? null : state.layerGroups[groupIndex];
+    state.layerRowCounts[groupIndex + 1] += 1;
+    if (group !== null && group.patchedBy.length > 0) {
+      state.layerPatchedCounts[groupIndex + 1] += 1;
+    }
+
     if (idPair !== undefined) {
       state.counts.entriesWithId += 1;
       if (!isLiteralString(idPair.value)) {
@@ -657,7 +767,17 @@ function checkEntries(state, root, lineOf) {
     if (state.rows.length >= PROFILE_DUMP_LIMITS.maxRows) {
       state.rowsTruncated = true;
     } else {
-      state.rows.push(buildRow(row, index, lineOf(row.range?.[0]), state.discloseIdentity));
+      const group = groupIndex === -1 ? null : state.layerGroups[groupIndex];
+      state.rows.push(
+        buildRow(
+          row,
+          index,
+          rowLine,
+          groupIndex === -1 ? null : groupIndex + 1,
+          group !== null && group.patchedBy.length > 0,
+          state.discloseIdentity,
+        ),
+      );
     }
   }
 }
@@ -691,6 +811,8 @@ function emptyCounts() {
 function buildSummary(state, inventory, root, input) {
   const limitations = [...PROFILE_DUMP_LIMITATIONS];
   if (state.discloseIdentity) limitations.push(...PROFILE_DUMP_DISCLOSURE_LIMITATIONS);
+  if (state.discloseLayers) limitations.push(...PROFILE_DUMP_LAYER_LIMITATIONS);
+  const empty = inventory === 'none';
   return {
     profileDumpSummary: PROFILE_DUMP_SCHEMA,
     input: { bytes: input.bytes, lines: input.lines },
@@ -698,11 +820,20 @@ function buildSummary(state, inventory, root, input) {
     inventory,
     root,
     identityDisclosed: state.discloseIdentity,
+    layersDisclosed: state.discloseLayers,
     counts: inventory === 'none' ? null : state.counts,
     // Rows follow `counts` and are null wherever the counters are null: a refused document has no
     // inventory to window over, and an empty array would read as "there are no entries".
     rows: inventory === 'none' ? null : state.rows,
     rowsTruncated: inventory === 'none' ? false : state.rowsTruncated,
+    // Layers are positions in the text, so they survive a refused document: a refusal caused by a
+    // bad row still happened under some separator, and hiding that would lose the only provenance
+    // the export carried.
+    layers: buildLayers(state),
+    // `rowId → {layer, patchFile, lineNumber}` is only emitted when BOTH disclosures are on: its
+    // keys are ids and its values carry labels. Null, never `{}`, so "not computed" cannot be read
+    // as "no rows had ids".
+    attribution: state.discloseIdentity && state.discloseLayers ? buildAttribution(state) : null,
     limits: { ...PROFILE_DUMP_LIMITS },
     diagnostics: state.diagnostics,
     diagnosticsTruncated: state.diagnosticsTruncated,
@@ -716,30 +847,92 @@ function buildSummary(state, inventory, root, input) {
 }
 
 /**
- * Read the only option this module accepts.
+ * Describe the export's layer separators.
+ *
+ * One entry per separator found, in text order, always with the positional facts and — only when
+ * layer disclosure was requested — the labels. `rowCount` counts every row under the separator,
+ * not just the rows that fitted in the display window; `patchedCount` counts the rows whose
+ * separator named at least one patching layer. Neither says what a patch changed.
+ *
+ * @param {object} state Walk state.
+ * @returns {Array<object>} Layer descriptors.
+ */
+function buildLayers(state) {
+  return state.layerGroups.map((group, index) => ({
+    index: index + 1,
+    line: group.line,
+    rowCount: state.layerRowCounts[index + 1] ?? 0,
+    patchedCount: state.layerPatchedCounts[index + 1] ?? 0,
+    origin: state.discloseLayers ? group.origin : null,
+    patchedBy: state.discloseLayers ? [...group.patchedBy] : null,
+  }));
+}
+
+/**
+ * Map a row's id to the export layer it rendered under.
+ *
+ * Only windowed rows appear (the display window is the only row list this summary has), only rows
+ * that carry a literal non-empty `id` appear, and only rows that rendered under a separator appear:
+ * a row above every separator has no layer, and inventing one would make provenance look better
+ * than it is. `patchFile` is the last patching layer when the separator named any, otherwise the
+ * origin — the layer that last wrote the row. `lineNumber` is the row's line in the export, never a
+ * line inside a patch file: the export does not carry those.
+ *
+ * @param {object} state Walk state.
+ * @returns {object} Id → attribution, or an empty object when nothing qualified.
+ */
+function buildAttribution(state) {
+  const attribution = {};
+  for (const row of state.rows) {
+    if (row.layer === null) continue;
+    if (typeof row.id !== 'string' || row.id === '') continue;
+    const group = state.layerGroups[row.layer - 1];
+    if (group === undefined) continue;
+    attribution[row.id] = {
+      layer: row.layer,
+      patchFile: group.patchedBy.length > 0 ? group.patchedBy[group.patchedBy.length - 1] : group.origin,
+      lineNumber: row.line,
+    };
+  }
+  return attribution;
+}
+
+/**
+ * Read the only options this module accepts.
  *
  * An unknown key is refused rather than ignored: silently dropping `{discloseIdentty: true}`
  * would produce a summary that looks disclosure-free while the caller believes otherwise.
  *
+ * The two disclosure flags are independent on purpose. `discloseLayers` copies layer labels —
+ * operator text that is usually a path — while `discloseIdentity` copies a row's literal `id`
+ * and `name`. Neither flag may unlock the other's data, so the `attribution` map, which is keyed
+ * by ids *and* carries labels, is emitted only when both are set.
+ *
  * @param {unknown} options Caller-supplied options.
- * @returns {boolean} Whether identity text was requested.
- * @throws {TypeError} On any shape other than an empty object or `{discloseIdentity: boolean}`.
+ * @returns {{discloseIdentity: boolean, discloseLayers: boolean}} Which disclosures were asked for.
+ * @throws {TypeError} On any shape other than an empty object or the two boolean flags.
  */
 function readDisclosureOption(options) {
   if (options === null || typeof options !== 'object' || Array.isArray(options)) {
     throw new TypeError('profile-dump: options must be an object');
   }
+  const allowed = new Set(['discloseIdentity', 'discloseLayers']);
   const keys = Object.keys(options);
   for (const key of keys) {
-    if (key !== 'discloseIdentity') {
+    if (!allowed.has(key)) {
       throw new TypeError('profile-dump: options carry an unknown key');
     }
   }
-  if (!Object.prototype.hasOwnProperty.call(options, 'discloseIdentity')) return false;
-  if (typeof options.discloseIdentity !== 'boolean') {
-    throw new TypeError('profile-dump: discloseIdentity must be a boolean');
+  for (const key of allowed) {
+    if (!Object.prototype.hasOwnProperty.call(options, key)) continue;
+    if (typeof options[key] !== 'boolean') {
+      throw new TypeError(`profile-dump: ${key} must be a boolean`);
+    }
   }
-  return options.discloseIdentity;
+  return {
+    discloseIdentity: options.discloseIdentity === true,
+    discloseLayers: options.discloseLayers === true,
+  };
 }
 
 /**
@@ -760,21 +953,31 @@ export function summarizeProfileDumpText(text, options = {}) {
     // Fixed text: the argument could be anything, including something worth not echoing.
     throw new TypeError('profile-dump: the document must be a string');
   }
-  const discloseIdentity = readDisclosureOption(options);
+  const { discloseIdentity, discloseLayers } = readDisclosureOption(options);
   // Always measured here. An earlier draft accepted a caller-supplied byte count, which let a
   // caller claim 0 bytes for a 40 MiB document and walk straight past the cap.
   const bytes = Buffer.byteLength(text, 'utf8');
   const state = {
     counts: emptyCounts(),
     discloseIdentity,
+    discloseLayers,
     rows: [],
     rowsTruncated: false,
+    // Scanned from the text, not from the parsed tree: the separators are comments, and a
+    // comment is not a node. `layerRowCounts` is parallel to `layerGroups` plus one leading slot
+    // for rows that render before any separator (index 0), so it never has to be keyed by a
+    // value that may be null.
+    layerGroups: scanLayerGroups(text),
+    layerRowCounts: [],
+    layerPatchedCounts: [],
     diagnostics: [],
     diagnosticsTruncated: false,
     entryDiagnostics: 0,
     refused: false,
     jsScalars: [],
   };
+  state.layerRowCounts = new Array(state.layerGroups.length + 1).fill(0);
+  state.layerPatchedCounts = new Array(state.layerGroups.length + 1).fill(0);
   const lines = countLines(text);
   const header = { bytes, lines, documents: 0 };
 

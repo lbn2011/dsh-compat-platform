@@ -1357,3 +1357,316 @@ positionally instead of through `--profile` / `--declaration`; that round is kep
 [`docs/testing/2026-11-09-correspondence.md`](../../docs/testing/2026-11-09-correspondence.md)
 at its own numbers. This section was written after the runs, so the run-time hash of this file is
 stated in the record.
+
+## 16. Conflict detection — A1 (`conflict-detector` + `conflict-service`)
+
+### 16.1 What it is
+
+Two modules, deliberately separated:
+
+- `src/conflict-detector.js` — a **pure** engine. You hand it claims (`owner`, `kind`, `key`,
+  `scope`, plus whatever metadata the rule needs) and it answers with conflicts. No timers, no I/O,
+  no host objects, no import order dependence.
+- `src/conflict-service.js` — the **host adapter**. It subscribes to four DSH events, re-reads an
+  injectable collector, feeds the engine and emits `conflict-detected`.
+
+The split is not stylistic. The detection rules are the part that must be testable and reviewable
+without a host; the wiring is the part that must survive a host with no collector, a collector that
+throws, or an event that arrives before the first reading.
+
+### 16.2 The four signals are triggers, not data
+
+The host events this module listens to carry **no occupancy information**. Their real signatures, as
+shipped:
+
+| Signal | Payload | Why it cannot answer "who occupies this key" |
+| --- | --- | --- |
+| `plugin-manager/changed` | `{ reason: 'plugin' \| 'bundle' \| 'install' \| 'remove' }` | names a *reason*; no entry, no fiber, no claims |
+| `tools/change` | none | tool definitions must be read from `ctx.tools` |
+| `slots/changed` | `key: string` | emitted by the client renderer; the key names what moved, not who holds it |
+| `internal/status` | `(fiber, oldValue)` | the one payload with real objects: `fiber.uid`, `fiber.name`, numeric `fiber.state` |
+
+So an event is never treated as a fact. It means *"the answer may have changed — re-read"*. That is
+why `attach()` subscribes and then immediately takes a first reading, and why `refresh()` is
+single-flight: a burst of `tools/change` during startup becomes one reading, not N overlapping ones.
+
+`internal/status` is the one signal acted on directly, because its payload does carry state:
+`FAILED` (3) is recorded as a **failure** (never a C-code — a failed plugin has not conflicted with
+anything yet), and `DISPOSED` (4) drops that owner's claims, which is what can surface a C8 race.
+
+### 16.3 The occupancy table, and why it has two views
+
+`table()` returns exactly the advertised shape:
+
+```js
+Map<"service"|"tool"|"slot"|"row"|"waterfall"|"config"|"event", Map<key, { owner, uid }>>
+```
+
+Every kind is always present, so a caller never has to distinguish "no such kind" from "nothing
+there". A key resolves to the **smallest `(owner, uid)`** claimant, with a null uid ranking before
+any numeric one — a deterministic answer, not a first-inserted one.
+
+But a resolved table **cannot express the conflict**, because the conflict is the duplicate. So the
+detector keeps every claimant internally and exposes it twice:
+
+- `table()` — the resolved view, for callers that need "who owns this key";
+- `claims()` / `claimsOf(kind, key)` — every claimant, for callers that need "who else tried".
+
+Claim identity is `(owner, kind, key, scope)`. Reporting the same claim twice is a no-op; reporting a
+claim whose metadata changed replaces its predecessor. Two owners claiming one key is *not* an
+error at insert time — it is the evidence C2/C3/C4/C5 report.
+
+### 16.4 What each code means here
+
+| Code | Fires when | Default severity |
+| --- | --- | --- |
+| C1 | a claim lists `requires` entry nothing provides (`service:`/`svc:`/`tool:`/`slot:` aliases plus explicit `provides`) | high |
+| C2 | two owners claim the same `service`/`row`/`tool` key in the same scope | blocker for `service`/`row`, high for `tool` |
+| C3 | two owners claim one `slot` key: blocker when the slot is `single`, high when keyed | high |
+| C4 | two waterfall claims on one key declare the **same** order | medium |
+| C5 | two config claims on one key declare the **same** `layerPriority` | medium |
+| C6 | a claim's `platforms` excludes the configured `platform` | high |
+| C7 | a claim's `hostRange` excludes the configured `hostVersion` | high |
+| C8 | an owner was removed while a live claim still requires a capability it was the last provider of | high |
+| C9 | a key breaks the grammar, or uses a reserved prefix (`dsh.`, `@deepseek-ai/`, `node:`) without `reservedAck` | medium |
+| C10 | an event name is within edit distance 2 of a known event but not equal to it | medium |
+| C11 | a resource was rejected at report time, or one `uid` is claimed by two owners | high |
+
+C8 is **derived**, not stored: it is recomputed on every read from the set of capabilities removed
+owners used to provide. It disappears the moment the dependent goes away or a replacement provider
+appears — a conflict record that lingers after the race is over is worse than no record. C1
+deliberately skips requirements a removed provider used to cover, so C1 and C8 never name the same
+fact twice.
+
+### 16.5 Where the answer is "unknown", not "fine"
+
+Six facts cannot be established from claims alone. Each produces a **limitation code**, never a
+guess and never silence:
+
+`HOST_VERSION_UNKNOWN`, `HOST_RANGE_UNCHECKED` (range syntax outside the supported semver subset —
+`workspace:*`, `latest`, …), `PLATFORM_UNKNOWN`, `EVENT_CATALOG_UNAVAILABLE` (no `knownEvents`
+configured, so C10 cannot run), `EVENT_NOT_IN_CATALOG`, `REQUIREMENT_MATCHING_IS_EXACT` (no prefix or
+range matching on capability names), `WATERFALL_ORDER_UNKNOWN`, `CONFIG_PRIORITY_UNKNOWN`.
+
+`snapshot().limitations` is the closed, sorted list. A consumer that reads only `conflicts` and
+ignores `limitations` is reading a partial answer, and the README says so rather than hiding it.
+
+### 16.6 Service surface
+
+```js
+import { createConflictService, apply } from 'dsh-compat-platform/conflict-service';
+
+const service = createConflictService(ctx, { platform: 'linux', hostVersion: '0.6.2' });
+service.attach();                                  // subscribes, takes a first reading
+await service.refresh();                           // re-reads the collector
+service.report('my-plugin', declaration);          // plugin-reported claims
+service.table(); service.claims(); service.conflicts(); service.snapshot();
+service.errors();                                  // what the adapter swallowed
+```
+
+`apply(ctx, config)` is the Cordis plugin entry: it attaches, provides the service as
+`compatConflicts` when the context supports `provide`, and detaches on `dispose`. `name` and `apply`
+live only on the `./conflict-service` subpath — they are too generic to own at the package root.
+
+The **default collector** reads `ctx.tools.definitions()` (one `tool` claim each, owner
+`host:tools`) and `ctx.pluginManager.listBundles()` rows (one `row` claim each, owner = bundle module
+name, scope `bundle`). That is what turns two bundles shipping the same `rowId` into a C2 without any
+plugin cooperation. Services are **not** invented: a host service table carries no reverse provider
+attribution, so claiming one would be a guess. Supply `collect` to read a richer host, or let plugins
+call `report()`.
+
+Failure handling is part of the contract: a collector that throws, an event whose `emit` throws, a
+subscriber that cannot be registered — each is recorded in `errors()` with its `stage`, and the host
+is never given an exception from a listener. `conflict-detected` carries only ids the previous
+answer did not contain (plus `snapshot.delta`), so a listener is not re-notified of a conflict it
+already knows. `conflict-resolved` is opt-in (`emitResolved: true`) and names the ids that vanished.
+
+### 16.7 What this module does **not** establish
+
+It does not prove that a plugin is installed, loaded or active; occupancy comes from what the host
+reports and what plugins declare, either of which can be stale or incomplete. It does not resolve
+capability requirements by prefix, version or range. It does not read a `.dsh` patch, a
+`peerDependencies` block or a lockfile — that is the static preflight (A2), which reuses this
+module's table rather than duplicating the rules. And a green run does not mean "no conflicts exist";
+it means "none are visible given these claims and these host facts", which is exactly what
+`limitations` records.
+
+### 16.8 Verification status
+
+**Executed (2026-11-12), serial, `node --test --test-concurrency=1`:**
+
+- `tests/conflict-detector.test.js` — 30/30 pass;
+- `tests/conflict-service.test.js` — 18/18 pass;
+- whole package at the time of the A1 change: **645 tests / 14 suites, 645 pass, 0 fail**.
+
+That 645 figure is the number this section's own run printed and is kept as history. The package has
+since grown two modules (A2, D1); the current package-wide figure is **698 tests / 21 suites, 698
+pass, 0 fail**, from one bounded run whose receipts are listed in §18.6 and in
+[`docs/testing/2026-11-12-analyzer-a2-d1.md`](../../docs/testing/2026-11-12-analyzer-a2-d1.md) §5.
+
+Counts above are the ones the run printed; nothing here is projected. The detector tests cover each
+code's firing *and* clearing case, the unknown cases (limitation instead of verdict), determinism
+under insertion order, id stability, and the argument/option refusal paths. The service tests cover
+the four subscriptions, single-flight refresh, first-reading emission, delta-only notification,
+collector failure, `FAILED` vs `DISPOSED` fibers, plugin-claim survival across a host re-read,
+`emit` failure, a null context, and `apply()`/`dispose` wiring.
+
+## 17. Static pre-check — A2 (`dsh-compat-pre-check`)
+
+### 17.1 What it answers
+
+A1 answers "what conflicting claims does the host currently see". A2 answers the question an author
+asks **before** installing anything: *given this package's `package.json` and the occupancy that
+already exists, which C-codes will this package walk into?*
+
+It is a pure function of text. It reads a manifest, optionally reads an occupancy table and
+declaration files, and returns a report. It installs nothing, resolves nothing, executes no plugin
+code, and does not need DSH running.
+
+### 17.2 The compatibility rule is copied from the host, not invented
+
+The peer/engine comparison is deliberately not "what seems reasonable". It reproduces
+`unmetRequirements` from `@deepseek-ai/dsh-app-boot` (`lib/index.js:1097`):
+
+- if the manifest has its own `engines.dsh`, that range alone decides the answer and
+  `peerDependencies` are **ignored entirely**;
+- otherwise every peer named `@deepseek-ai/dsh` or starting with `@deepseek-ai/dsh-` is checked;
+- `workspace:^`, `workspace:~` and `workspace:*` mean "whatever is running" and are always satisfied;
+- a non-string range is a manifest finding, not a silent skip.
+
+A2 reuses A1's `satisfiesRange` for the comparison, so the two modules cannot disagree about what a
+range means. When the range uses syntax outside that subset, the answer is the same limitation code
+A1 uses (`HOST_RANGE_UNCHECKED`) — never a fabricated verdict.
+
+### 17.3 Claims it builds, and the one it refuses to build
+
+| Manifest fact | Claim |
+| --- | --- |
+| each `dsh.<entryId>` (never the reserved `dsh.bundle`) | `{ kind: 'row', key: entryId, scope: 'profile' }` |
+| `entry.inject[]` | `requires: ['service:<name>', …]` — **only** with `--complete-providers` |
+| `entry.platform` | `platforms: [value]` |
+| `engines.dsh` | `{ kind: 'service', key: '@deepseek-ai/dsh', scope: 'engines', hostRange }` |
+| each non-workspace DSH peer | `{ kind: 'service', key: <peer>, scope: 'peer', hostRange }` |
+
+Two details are load-bearing and were wrong on the first attempt:
+
+- `inject` entries are **not** bare names. A1 matches requirements against the capability vocabulary
+  (`service:`/`svc:`/`tool:`/`slot:` prefixes); a bare `tools` would never match a claim keyed
+  `tools`, so every entry with `inject` would raise a phantom C1. They are prefixed explicitly.
+- host requirements carry `reservedAck: true`. DSH peer names live under the reserved prefixes
+  (`@deepseek-ai/`, `dsh.`), so without the acknowledgement every DSH peer dependency would raise a
+  bogus C9 namespace finding — the exact false positive C9 exists to avoid.
+
+`inject` is gated because A1's C1 asks "does *nobody* provide this". Without a complete provider
+leaves `inject` as `requires` and reports `PROVIDER_SET_COMPLETENESS_UNKNOWN` instead.
+
+### 17.4 Predicted vs pre-existing
+
+Conflicts whose owner list includes the candidate are `predicted`; the rest are `preexisting`. The
+exit code is raised by `predicted` only — a package is not made "not installable" because the host
+was already broken. `preexisting` is still reported, because "installing this changes nothing about
+the existing blocker" is useful and omitting it would be a lie of emphasis.
+
+### 17.5 CLI
+
+```bash
+dsh-compat-pre-check --manifest package.json \
+  [--occupancy occupancy.json] [--declaration decl.json]... \
+  [--host-version 0.6.2] [--platform linux] [--complete-providers]
+```
+
+One JSON document on stdout, usage text on stderr. Exit `0` clean, `1` predicted conflict, `2`
+unusable input, `5` internal, `64` usage. Reader failures are classified by exact message against the
+closed `READER_TEXT` map shared with the other CLIs; anything unrecognised is `INTERNAL`, fail closed.
+
+### 17.6 Limitations
+
+`PROVIDER_SET_COMPLETENESS_UNKNOWN` (no occupancy was supplied, so required capabilities are not
+checked), `BUNDLE_PATCH_ROWS_NOT_READ` (a `dsh.bundle.patch` list is not expanded into rows — its
+inserts target a profile that is not being read here), `PREDICTION_IS_NOT_AN_INSTALL` (a green
+pre-check says "no *visible* conflict given these inputs", nothing about install success or runtime
+behaviour).
+
+### 17.7 Verification status
+
+One bounded run (`scripts/spec-test-batch`, absolute entry path) ended `acceptance_exit=0` with TAP
+`tests 698 / pass 698 / fail 0 / cancelled 0 / skipped 0 / todo 0`; this CLI's 30 tests are among
+them and are matched by name against the TAP log in §5.2 of
+[`docs/testing/2026-11-12-analyzer-a2-d1.md`](../../docs/testing/2026-11-12-analyzer-a2-d1.md).
+Two earlier rounds were RED — 36 then 14 failures — and §4 of that record names each cause and the
+fix that argues it. The pre-check's own CLI paths (clean `0`, predicted conflict `1`, unusable `2`,
+internal `5`, usage `64`) are covered by tests that spawn the real entry point.
+
+A green run here means the suite passes in the bounded envelope. A2 is still a prediction from a
+manifest and a table: it is not an install, and `PROVIDER_SET_COMPLETENESS_UNKNOWN` /
+`BUNDLE_PATCH_ROWS_NOT_READ` still apply (17.6).
+
+## 18. Layer attribution — D1 (`profile-dump` schema `0.4-draft.1`)
+
+### 18.1 Where the provenance comes from
+
+`renderConfigDump` writes a `# == ` comment at column 0 before each run of rows:
+
+```
+# == cordis.yml, patched by /home/operator/profile.patch.yml
+```
+
+So the dump already **displays** which layer produced a row and which layers patched it. D1 reads
+that, and only that. It does not open a single patch file, resolve a path, or infer a layer from key
+order — a layer guessed from ordering would be worse than no layer at all.
+
+Matching is anchored at column 0 (`/^# == (.*)$/`). A `#`-leading line inside a block scalar is
+indented, so it cannot be a separator; the suite pins that case (an indented separator must not split
+a layer). The only interpretation performed is one split on the fixed `, patched by ` marker, taken
+at its first occurrence so a label containing a comma still parses.
+
+### 18.2 What every row now carries
+
+`layer` (1-based group index, or `null` above the first separator) and `patched` (that layer's row was
+changed by a later layer) are unconditional. They are indices and a boolean — no operator text, so
+they are safe under the default (undisclosed) mode.
+
+`layers[]` is likewise always present: `{ index, line, rowCount, patchedCount, origin, patchedBy }`,
+with `origin`/`patchedBy` nulled unless disclosure was requested. `rowCount`/`patchedCount` are
+counted over **all** rows, not just the retained window, so the counts stay honest when `rows` is
+truncated at `maxRows`.
+
+### 18.3 Two independent flags, on purpose
+
+- `discloseIdentity` — reveals `id`/`name` text.
+- `discloseLayers` — reveals layer labels (which are, in practice, filesystem paths).
+
+`attribution` (`{ rowId: { layer, patchFile, lineNumber } }`) requires **both**. It is keyed by
+`rowId`, so it discloses identity by construction; one flag must not silently unlock the other
+flag's data. `patchFile` is the last `patchedBy` entry, else the origin. `lineNumber` is the row's
+line **in the export** — see 18.4.
+
+### 18.4 Four limitations it refuses to paper over
+
+`LAYER_LABELS_ARE_OPERATOR_TEXT_AND_MAY_CARRY_PATHS` — the label is whatever the exporter wrote.
+`LAYER_BOUNDARIES_COME_FROM_EXPORT_COMMENTS_NOT_FROM_PATCH_SEMANTICS` — a separator delimits runs in
+the *text*; it is not a claim about how a merge was computed.
+`PATCH_FILE_LINE_UNKNOWN` — the line **inside a `.patch.yml`** is not derivable from a dump. Only the
+row's line in the export is known, and `lineNumber` says so rather than pretending otherwise.
+`PATCHED_FLAG_DOES_NOT_SAY_WHAT_CHANGED` — "a later layer touched this row" is all the export says;
+whether it replaced config, disabled a row or inserted a group is not recorded.
+
+### 18.5 Compatibility
+
+The schema string moved to `profile-dump-summary/0.4-draft.1` because the row shape grew two keys.
+`layer: null` and `patched: false` are the honest answer for a dump that carries no separators, so a
+0.3 consumer reading rows still finds every key it knew. `--disclose-layers` is a separate CLI flag;
+a repeated or unknown flag is a usage error (`64`), and an unknown option key in the library is a
+fixed `TypeError` — the same discipline as every other options object in this package.
+
+### 18.6 Verification status
+
+One bounded run (`scripts/spec-test-batch`, absolute entry path) ended `acceptance_exit=0` with TAP
+`tests 698 / pass 698 / fail 0 / cancelled 0 / skipped 0 / todo 0`: 20 test files, including this
+section's 23 tests, and the 95 `tests/profile-dump.test.js` tests that the first round lost to a
+file-load failure. §5.2 of [`docs/testing/2026-11-12-analyzer-a2-d1.md`](../../docs/testing/2026-11-12-analyzer-a2-d1.md)
+matches every declared test name in these files against the TAP log rather than trusting the total.
+Two earlier runs were RED (36 then 14 failures); their causes are recorded there, not hidden.
+
+This says the suite passes in the bounded envelope. It says nothing about a real dump produced by a
+real host, and nothing about patch merge semantics (18.4).

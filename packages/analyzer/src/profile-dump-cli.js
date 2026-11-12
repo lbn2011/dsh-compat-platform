@@ -43,13 +43,17 @@ import {
 const USAGE_TEXT = `dsh-compat-profile-dump — summarize one dsh --dump-config export
 
 Usage:
-  dsh-compat-profile-dump [--disclose-identity] <dump.yml>
+  dsh-compat-profile-dump [--disclose-identity] [--disclose-layers] <dump.yml>
 
   Reads exactly one explicitly named regular file (no stdin, no globs, no defaults) and
   prints one JSON summary on stdout. Usage text goes to stderr.
 
   --disclose-identity  Copy each row's literal id and name text into the summary.
                        Off by default. Config values are never copied, with or without it.
+  --disclose-layers    Copy the export's "# == " layer labels (usually file paths) into
+                       layers[], and emit the rowId -> {layer, patchFile, lineNumber}
+                       attribution map when --disclose-identity is also given.
+                       Off by default, and independent of --disclose-identity.
 
 Exit codes:
   0   parsed; no entry-level diagnostics (the presence of !!js alone stays 0)
@@ -224,14 +228,21 @@ export async function main(argv, io = {}) {
   // True when the single JSON document reached stdout. There is never a second attempt.
   const emit = (document) => writeOnce(stdout, `${JSON.stringify(document, null, 2)}\n`);
 
-  // One positional path, at most one `--disclose-identity`. Any other option-shaped argument is a
-  // usage error rather than a filename: a typo must not become a path this command tries to read.
+  // One positional path and at most one of each disclosure flag. Any other option-shaped argument
+  // is a usage error rather than a filename: a typo must not become a path this command tries to
+  // read. The two flags are counted separately, so `--disclose-identity --disclose-identity` is a
+  // usage error while the two different flags together are legal.
   const discloseIdentity = args.includes('--disclose-identity');
-  const positional = args.filter((arg) => arg !== '--disclose-identity');
+  const discloseLayers = args.includes('--disclose-layers');
+  const positional = args.filter(
+    (arg) => arg !== '--disclose-identity' && arg !== '--disclose-layers',
+  );
   const flagCount = args.length - positional.length;
   const bad =
     positional.length !== 1 ||
-    flagCount > 1 ||
+    flagCount > 2 ||
+    args.filter((arg) => arg === '--disclose-identity').length > 1 ||
+    args.filter((arg) => arg === '--disclose-layers').length > 1 ||
     positional[0] === '-' ||
     positional[0].startsWith('-');
 
@@ -264,7 +275,7 @@ export async function main(argv, io = {}) {
 
   let result;
   try {
-    result = summarizeProfileDumpText(text, { discloseIdentity });
+    result = summarizeProfileDumpText(text, { discloseIdentity, discloseLayers });
   } catch {
     // Includes an escaping RangeError from the parser's own recursion.
     const written = await emit(

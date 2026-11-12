@@ -22,7 +22,7 @@ readonly -a BR_UNIT_FAMILIES=(
 )
 br_prefix_allowed() {
   case "$1" in
-    profile-dump-batch|config-check-batch|diagnose-batch|dependency-shape-batch|correspondence|correspondence-batch|repair-plan-batch|diagnose-real-wiring|diagnostics-gui|diagnostics-gui-run|profile-dump-retained-export|profile-dump-install|package-install|trusted-extraction-batch|trusted-extraction-hang|spec-test-batch|second-version-baseline|second-version-observe|second-install-tree) return 0;;
+    profile-dump-batch|config-check-batch|diagnose-batch|dependency-shape-batch|correspondence|correspondence-batch|repair-plan-batch|diagnose-real-wiring|diagnostics-gui|diagnostics-gui-run|profile-dump-retained-export|profile-dump-install|package-install|trusted-extraction-batch|trusted-extraction-hang|spec-test-batch|second-version-baseline|second-version-observe|second-install-tree|host-api-batch|lifecycle-bootstrap-batch|asset-proxy-batch|conflict-arbiter-batch|integration-batch) return 0;;
     *) return 1;;
   esac
 }

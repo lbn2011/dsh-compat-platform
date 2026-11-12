@@ -24,6 +24,7 @@ import { resolve } from 'node:path'
 
 import { readEnvelope } from './envelope.js'
 import { PAGE_CONTENT_TYPE, renderPage } from './page.js'
+import { applyHostApi } from './api.js'
 
 /** Plugin name, as the host composition records it. */
 export const name = 'dsh-compat-diagnostics-ui'
@@ -187,7 +188,7 @@ async function handlePage(settings, ctx, req, res) {
   const result = await readEnvelope(settings.envelopePath)
   if (!result.ok) return writeJson(res, 503, refusalBody(result))
 
-  const body = Buffer.from(renderPage(), 'utf8')
+  const body = Buffer.from(renderPage(settings.envelopeRoutePath), 'utf8')
   res.writeHead(200, {
     'content-type': PAGE_CONTENT_TYPE,
     'content-length': String(body.length),
@@ -205,6 +206,14 @@ async function handlePage(settings, ctx, req, res) {
  * @param {unknown} config - `{ envelopePath, pagePath?, envelopeRoutePath? }`.
  */
 export function apply(ctx, config) {
+  // The diagnostic API is mounted only when the composition carries a
+  // `connection` service. Its routes inherit that carrier's trust policy; with no
+  // carrier there is no fence, and an unfenced diagnostic route must not exist.
+  // This is independent of the envelope page, which takes its own config.
+  applyHostApi(ctx, {
+    includeMessageText: isPlainRecord(config) && config.includeMessageText === true,
+  })
+
   const settings = readOptions(config)
   ctx.effect(() => {
     const disposers = [

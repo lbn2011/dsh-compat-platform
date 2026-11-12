@@ -1,0 +1,37 @@
+{
+  "name": "dsh-compat-asset-proxy",
+  "version": "0.1.0-draft.1",
+  "type": "module",
+  "description": "Injects the assets a plugin declares in dsh.client.assets into the boot page through webserver/index-inject. Reads a warm cache, emits structured injection rows, and writes nothing.",
+  "engines": {
+    "node": ">=24.9.0"
+  },
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./declaration": "./src/asset-declaration.js",
+    "./rows": "./src/asset-rows.js",
+    "./proxy": "./src/asset-proxy.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/",
+    "README.md"
+  ],
+  "dsh": {
+    "asset-proxy": {
+      "inject": [
+        "webServer",
+        "pluginManager"
+      ]
+    }
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 \"tests/*.test.js\""
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lbn2011/dsh-compat-platform.git"
+  }
+}

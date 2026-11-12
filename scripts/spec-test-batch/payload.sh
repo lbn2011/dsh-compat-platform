@@ -1,0 +1,227 @@
+#!/bin/bash
+# Bounded full-suite payload for packages/analyzer. Host alone owns unit.log.
+set +e
+set -uo pipefail
+REPO=/root/dsh-ecosystem-spec/projects/dsh-compat-platform
+PKG=$REPO/packages/analyzer
+SLICE=$REPO/scripts/spec-test-batch
+CORE=$REPO/scripts/bounded-runner
+NODE=/www/server/nodejs/v24.21.0/bin/node
+EXPECT_TEST_SCRIPT='node --test --test-concurrency=1 "tests/*.test.js" "tests/*.test.mjs"'
+EXPECT_YAML_VERSION='2.9.1'
+source "$CORE/common.sh" || exit 70
+source "$CORE/policy.sh" || exit 70
+source "$CORE/envelope.sh" || exit 70
+[ "$#" -eq 2 ] || exit 70
+br_unit "$1" && br_path "$2" && [ -d "$2" ] || exit 70
+BR_UNIT=$1 BR_RUN=$2
+RUN=$BR_RUN
+
+profile_payload() {
+  source "$CORE/tap.sh" || return 70
+  br_envelope_enter "$BR_UNIT" "$BR_RUN"; rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
+  [ -d "$PKG" ] && [ -x "$NODE" ] || return 70
+  command -v bwrap >/dev/null 2>&1 || return 70
+  # Retained future in-envelope syntax steps; none executed during migration.
+  br_evidence_gate || return 73
+  bash -n "$SLICE/run.sh"; acc_syntax_run_sh_rc=$?
+  br_record "$RUN/syntax-run.txt" 'acc_syntax_run_sh_rc=%s\n' "$acc_syntax_run_sh_rc" || :
+  br_evidence_gate || return 73
+  bash -n "$SLICE/payload.sh"; acc_syntax_payload_sh_rc=$?
+  br_record "$RUN/syntax.txt" 'acc_syntax_run_sh_rc=%s\nacc_syntax_payload_sh_rc=%s\n' \
+    "$acc_syntax_run_sh_rc" "$acc_syntax_payload_sh_rc" || :
+  br_evidence_gate || return 73
+  [ "$acc_syntax_run_sh_rc" -eq 0 ] && [ "$acc_syntax_payload_sh_rc" -eq 0 ] || return 71
+
+  if ! cat > "$RUN/static-contract.mjs" <<'CONTRACT'
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+
+const pkgDir = process.env.EXPECT_PKG_DIR;
+const expectedTest = process.env.EXPECT_TEST_SCRIPT;
+const expectedYaml = process.env.EXPECT_YAML_VERSION;
+const fail = [];
+const say = (line) => process.stdout.write(`${line}\n`);
+
+let manifest;
+try {
+  manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'));
+} catch (error) {
+  say('manifest_parse=fail');
+  process.exit(1);
+}
+say('manifest_parse=pass');
+say(`manifest_test_script_exact=${manifest.scripts?.test === expectedTest ? 'pass' : 'fail'}`);
+if (manifest.scripts?.test !== expectedTest) fail.push('scripts.test');
+
+const deps = manifest.dependencies ?? {};
+const depNames = Object.keys(deps);
+say(`dependency_count=${depNames.length}`);
+say(`dependency_yaml_exact=${deps.yaml === expectedYaml ? 'pass' : 'fail'}`);
+if (deps.yaml !== expectedYaml) fail.push('dependencies.yaml');
+if (depNames.some((name) => name !== 'yaml')) fail.push('extra-dependency');
+
+// The two bins this slice exists to qualify. A missing or renamed bin is a
+// contract failure, not a test-runner discovery result.
+const bins = {
+  'dsh-compat-profile-dump': './src/profile-dump-cli.js',
+  'dsh-compat-pre-check': './src/pre-check-cli.js',
+};
+for (const [name, target] of Object.entries(bins)) {
+  const actual = manifest.bin?.[name];
+  say(`bin_${name}=${actual === target ? 'pass' : 'fail'}`);
+  if (actual !== target) fail.push(`bin:${name}`);
+}
+
+// Subpath exports exercised by this slice, each as a types/default pair.
+const exportsExpected = {
+  './profile-dump': ['./src/profile-dump.d.ts', './src/profile-dump.js'],
+  './pre-check': ['./src/pre-check.d.ts', './src/pre-check.js'],
+};
+for (const [subpath, [types, target]] of Object.entries(exportsExpected)) {
+  const entry = manifest.exports?.[subpath];
+  const ok = entry?.types === types && entry?.default === target;
+  say(`export_${subpath}=${ok ? 'pass' : 'fail'}`);
+  if (!ok) fail.push(`export:${subpath}`);
+}
+
+for (const rel of [
+  'src/index.js',
+  'src/index.d.ts',
+  'src/profile-dump.js',
+  'src/profile-dump.d.ts',
+  'src/profile-dump-cli.js',
+  'src/pre-check.js',
+  'src/pre-check.d.ts',
+  'src/pre-check-cli.js',
+  'tests/profile-dump.test.js',
+  'tests/profile-dump-layers.test.js',
+  'tests/pre-check.test.js',
+]) {
+  say(`file_present ${rel}=${existsSync(join(pkgDir, rel)) ? 'yes' : 'no'}`);
+  if (!existsSync(join(pkgDir, rel))) fail.push(rel);
+}
+
+const declared = manifest.scripts?.test?.match(/tests\/\*\.test\.(js|mjs)/g) ?? [];
+const present = readdirSync(join(pkgDir, 'tests'))
+  .filter((name) => /\.test\.(js|mjs)$/.test(name))
+  .map((name) => `tests/${name}`)
+  .sort();
+say(`test_files_present=${present.length}`);
+say(`test_files=${present.join(',')}`);
+if (!declared.length) fail.push('test-glob');
+
+// Dependency precondition. This batch never installs; it refuses instead.
+const yamlManifest = join(pkgDir, 'node_modules', 'yaml', 'package.json');
+if (!existsSync(yamlManifest)) {
+  say('dependency_resolution=absent');
+  say('dependency_note=not installed; this batch does not install');
+  process.exit(3);
+}
+let installed;
+try {
+  installed = JSON.parse(readFileSync(yamlManifest, 'utf8')).version;
+} catch {
+  say('dependency_resolution=unreadable');
+  process.exit(3);
+}
+say(`dependency_resolution=${installed === expectedYaml ? 'exact' : 'mismatch'}`);
+say(`dependency_installed_version=${installed}`);
+if (installed !== expectedYaml) process.exit(3);
+
+say(`static_contract=${fail.length === 0 ? 'pass' : 'fail'}`);
+say(`static_contract_failures=${fail.join(',') || 'none'}`);
+process.exit(fail.length === 0 ? 0 : 1);
+CONTRACT
+  then br_write_failure static-contract-write; return 73; fi
+  if ! exec 7>"$RUN/static-contract.log"; then br_write_failure static-contract.log; return 73; fi
+  br_evidence_gate || { exec 7>&-; return 73; }
+  env -i PATH=/usr/bin:/bin HOME=/tmp NODE_OPTIONS="$BR_NODE_OPTIONS" \
+    EXPECT_PKG_DIR="$PKG" EXPECT_TEST_SCRIPT="$EXPECT_TEST_SCRIPT" \
+    EXPECT_YAML_VERSION="$EXPECT_YAML_VERSION" \
+    "$NODE" "$RUN/static-contract.mjs" >&7 2>&1
+  static_rc=$?
+  exec 7>&-
+  br_record "$RUN/static-contract.rc" 'static_contract_rc=%s\n' "$static_rc" || :
+  cat "$RUN/static-contract.log" || br_write_failure static-log-relay
+  if ! printf 'static_contract_rc=%s\n' "$static_rc" >> "$RUN/static-contract.log"; then
+    br_write_failure static-contract-rc-line
+  fi
+  if [ "$static_rc" -eq 3 ]; then
+    br_record "$RUN/static-verdict.txt" 'acc_static_contract=blocked\nacc_block_reason=yaml_dependency_not_installed\n' || :
+    return 71
+  fi
+  if [ "$static_rc" -ne 0 ]; then
+    br_record "$RUN/static-verdict.txt" 'acc_static_contract=fail\n' || :
+    return 71
+  fi
+  br_record "$RUN/static-verdict.txt" 'acc_static_contract=pass\n' || :
+  br_evidence_gate || return 73
+
+  # Preserve two-point regular-file snapshots and refusal of any YAML symlink.
+  # This is not installation provenance, dependency closure or transient-edit detection.
+  yaml_dir="$PKG/node_modules/yaml"
+  yaml_manifest() {
+    [ -d "$yaml_dir" ] && [ ! -L "$yaml_dir" ] || return 1
+    local links
+    links=$(find "$yaml_dir" -type l -print -quit 2>/dev/null)
+    [ $? -eq 0 ] && [ -z "$links" ] || return 1
+    ( cd "$yaml_dir" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum ) || return 1
+  }
+  if yaml_manifest > "$RUN/yaml-manifest-before.txt" 2>/dev/null && [ -s "$RUN/yaml-manifest-before.txt" ]; then
+    yaml_before_count=$(awk 'END { print NR }' "$RUN/yaml-manifest-before.txt") || { br_write_failure yaml-count; return 73; }
+  else br_write_failure yaml-manifest-before.txt; return 73; fi
+  br_record "$RUN/workload.txt" 'node=%s\nworkdir=%s\ntest_glob=%s\n' \
+    "$NODE" "$PKG" 'tests/*.test.js tests/*.test.mjs' || :
+  if ! exec 7>"$RUN/node-tap.log"; then br_write_failure node-tap.log; return 73; fi
+  if ! exec 8>"$RUN/node-stderr.log"; then br_write_failure node-stderr.log; exec 7>&-; return 73; fi
+  br_evidence_gate || { exec 7>&- 8>&-; return 73; }
+  bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp \
+    --unshare-pid --unshare-net --unshare-ipc --unshare-uts --die-with-parent \
+    --chdir "$PKG" \
+    -- /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp \
+       NODE_OPTIONS="$BR_NODE_OPTIONS" \
+       "$NODE" --test --test-concurrency=1 --test-reporter=tap \
+         'tests/*.test.js' 'tests/*.test.mjs' \
+    >&7 2>&8
+  node_rc=$?
+  exec 7>&- 8>&-
+  br_record "$RUN/node.rc" 'node_rc=%s\n' "$node_rc" || :
+  cat "$RUN/node-tap.log" || br_write_failure tap-relay
+
+  yaml_snapshot=unreadable
+  if yaml_manifest > "$RUN/yaml-manifest-after.txt" 2>/dev/null && [ -s "$RUN/yaml-manifest-after.txt" ]; then
+    if ! exec 7>"$RUN/yaml-manifest-diff.txt"; then br_write_failure yaml-manifest-diff.txt; return 73; fi
+    diff -q "$RUN/yaml-manifest-before.txt" "$RUN/yaml-manifest-after.txt" >&7 2>&1
+    diff_rc=$?
+    exec 7>&-
+    case "$diff_rc" in
+      0) yaml_snapshot=identical;;
+      1) yaml_snapshot=changed;;
+      *) br_write_failure yaml-manifest-diff;;
+    esac
+  else br_write_failure yaml-manifest-after.txt; fi
+  br_record "$RUN/yaml-manifest.txt" 'yaml_dir=%s\nyaml_manifest_files_before=%s\nyaml_manifest_snapshot_state=%s\n' \
+    "$yaml_dir" "$yaml_before_count" "$yaml_snapshot" || :
+  br_evidence_gate || return 73
+  br_tap_check "$RUN/node-tap.log" "$node_rc"; tap_rc=$?
+  br_record "$RUN/tap-fields.txt" '%s' '' || :
+  br_record "$RUN/tap-summary.txt" '%s' '' || :
+  for k in tests pass fail cancelled skipped todo; do
+    state=ok
+    value=$(br_tap_value "$RUN/node-tap.log" "$k") || { state=invalid; value='<invalid>'; }
+    if ! printf 'tap_field_%s=%s\n' "$k" "$state" >> "$RUN/tap-fields.txt"; then br_write_failure tap-fields.txt; fi
+    if ! printf 'tap_%s=%s\n' "$k" "$value" >> "$RUN/tap-summary.txt"; then br_write_failure tap-summary.txt; fi
+  done
+  verdict=pass
+  [ "$tap_rc" -eq 0 ] || verdict=tap_not_green
+  if [ "$yaml_snapshot" != identical ]; then verdict="yaml_snapshot_$yaml_snapshot"; tap_rc=72; fi
+  br_record "$RUN/tap-verdict.txt" 'acc_smoke_verdict=%s\nacc_yaml_snapshot=%s\nnode_rc=%s\ntap_check_rc=%s\n' \
+    "$verdict" "$yaml_snapshot" "$node_rc" "$tap_rc" || :
+  return "$tap_rc"
+}
+profile_payload
+rc=$?
+br_payload_finish "$rc"
+exit "$?"

@@ -1,5 +1,5 @@
 /** Format identifier of the profile-dump summary document. */
-export const PROFILE_DUMP_SCHEMA: 'profile-dump-summary/0.3-draft.1';
+export const PROFILE_DUMP_SCHEMA: 'profile-dump-summary/0.4-draft.1';
 
 /**
  * Fixed limits. These are policy limits on the **input** and on the walk this command performs;
@@ -36,6 +36,11 @@ export const PROFILE_DUMP_NOT_DERIVED: readonly [
  * artifact's envelope rather than about any particular document.
  */
 export const PROFILE_DUMP_DISCLOSURE_LIMITATIONS: readonly string[];
+/**
+ * Limitations added only when `discloseLayers` was requested. They say what layer provenance read
+ * out of the export's `# == ` comments can and cannot mean.
+ */
+export const PROFILE_DUMP_LAYER_LIMITATIONS: readonly string[];
 export const PROFILE_DUMP_LIMITATIONS: readonly string[];
 
 /** Every diagnostic code this module can emit. Closed set. */
@@ -130,6 +135,13 @@ export interface ProfileDumpRow {
   index: number;
   /** 1-based line the row starts on, or `null` when the node carries no position. */
   line: number | null;
+  /**
+   * 1-based export layer the row rendered under, or `null` when no `# == ` separator precedes it.
+   * This module's own numbering of the separators it found, not a layer ordinal the loader knows.
+   */
+  layer: number | null;
+  /** Whether this row's separator named at least one patching layer. Says nothing about what changed. */
+  patched: boolean;
   /** Number of keys in the row mapping, modelled or not. */
   keyCount: number;
   idKind: 'absent' | 'string' | 'non-string';
@@ -149,6 +161,35 @@ export interface ProfileDumpRow {
   id: string | null;
   /** The row's literal `name` text, or `null`; same caveats as `id`. Never a config value. */
   name: string | null;
+}
+
+/** One export layer separator, with labels only when layer disclosure was requested. */
+export interface ProfileDumpLayer {
+  /** 1-based order of the separator in the export. */
+  index: number;
+  /** 1-based line of the `# == ` comment. */
+  line: number;
+  /** Rows under this separator in the whole export, not only in the display window. */
+  rowCount: number;
+  /** How many of those rows had a patching layer named on their separator. */
+  patchedCount: number;
+  /** The separator's origin label, or `null` when disclosure is off or the label was empty. */
+  origin: string | null;
+  /** The separator's patching layer labels, or `null` when disclosure is off. Never empty-vs-null. */
+  patchedBy: string[] | null;
+}
+
+/**
+ * `rowId -> {layer, patchFile, lineNumber}`, emitted only when both disclosures are on.
+ *
+ * `patchFile` is the last patching layer when the separator named any, otherwise the origin.
+ * `lineNumber` is the row's line in the export; a line inside a patch file is not derivable from
+ * an export and is not claimed (`PATCH_FILE_LINE_UNKNOWN`).
+ */
+export interface ProfileDumpAttribution {
+  layer: number;
+  patchFile: string | null;
+  lineNumber: number | null;
 }
 
 /** Counts only. No identifier, name, key or value is ever included. */
@@ -182,6 +223,8 @@ export interface ProfileDumpSummary {
    * `id`/`name` is `null` and the disclosure limitations are absent from `limitations`.
    */
   identityDisclosed: boolean;
+  /** Whether this summary was produced with `{ discloseLayers: true }`. */
+  layersDisclosed: boolean;
   counts: ProfileDumpCounts | null;
   /**
    * A capped display window over `counts.entries`, `null` wherever `counts` is `null` (a refused
@@ -190,6 +233,13 @@ export interface ProfileDumpSummary {
    */
   rows: ProfileDumpRow[] | null;
   rowsTruncated: boolean;
+  /** Every `# == ` separator in the export, in text order. Null labels unless `layersDisclosed`. */
+  layers: ProfileDumpLayer[];
+  /**
+   * The attribution map, or `null`. Non-null only when `identityDisclosed && layersDisclosed`,
+   * because its keys are ids and its values carry labels: neither flag may unlock the other's data.
+   */
+  attribution: Record<string, ProfileDumpAttribution> | null;
   limits: {
     maxBytes: number;
     maxLines: number;
@@ -231,7 +281,10 @@ export interface ProfileDumpResult {
  */
 export function summarizeProfileDumpText(
   text: string,
-  options?: { discloseIdentity?: boolean },
+  options?: {
+    discloseIdentity?: boolean;
+    discloseLayers?: boolean;
+  },
 ): ProfileDumpResult;
 
 /** Exit code implied by a result: 0, 1 or 2. */

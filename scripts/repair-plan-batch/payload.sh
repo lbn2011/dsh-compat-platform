@@ -8,7 +8,7 @@ SLICE=$REPO/scripts/repair-plan-batch
 CORE=$REPO/scripts/bounded-runner
 NODE=/www/server/nodejs/v24.21.0/bin/node
 EXPECT_EXPORTS='|./src/repair-plan.js|./src/repair-preview.js|./src/repair-approval.js|./src/repair-apply.js|./src/fixture-applier.js|'
-EXPECT_PLAN_VERSION='repair-plan/0.1-draft.1'
+EXPECT_PLAN_VERSION='repair-plan/0.2-draft.1'
 source "$CORE/common.sh" || exit 70
 source "$CORE/policy.sh" || exit 70
 source "$CORE/envelope.sh" || exit 70
@@ -95,7 +95,7 @@ const preview = await import(join(pkgDir, 'src/repair-preview.js'));
 say(`plan_version_exact=${plan.PLAN_VERSION === expectPlanVersion ? 'pass' : 'fail'}`);
 if (plan.PLAN_VERSION !== expectPlanVersion) fail.push('plan-version');
 say(`operation_vocabulary_width=${plan.OPERATION_KINDS.length}`);
-if (plan.OPERATION_KINDS.length !== 1) fail.push('vocabulary-width');
+if (plan.OPERATION_KINDS.length !== 5) fail.push('vocabulary-width');
 say(`flag_fields=${plan.FLAG_FIELDS.join(',')}`);
 if (plan.FLAG_FIELDS.join(',') !== 'disabled') fail.push('flag-fields');
 say(`confined_apply_limitation=${plan.PLAN_LIMITATIONS.includes('APPLY_PATH_IS_CONFINED_TO_A_FIXTURE_DIRECTORY') ? 'pass' : 'fail'}`);

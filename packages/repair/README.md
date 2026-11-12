@@ -70,6 +70,32 @@ The accepted document subset is small on purpose: `- key: value` opens a record,
 mappings, tagged or quoted values, flow collections — is refused with its own code
 rather than silently widened.
 
+## Five operations, scoped to the version that carries them
+
+`repair-plan/0.2-draft.1` extends the vocabulary from one operation to five, all still
+confined to the entry-list subset of a `cordis.yml`:
+
+| Operation | Effect | Notable refusals |
+| --- | --- | --- |
+| `set-entry-flag` | set `disabled` on one entry | unchanged from `0.1` |
+| `set-entry-config` | set one `config` key of one entry | `PLAN_CONFIG_KEY_INVALID`, `PLAN_VALUE_UNSUPPORTED`; the preview refuses a missing block (`PREVIEW_ENTRY_CONFIG_ABSENT`), a missing key (`PREVIEW_CONFIG_KEY_ABSENT`) and an inline mapping it will not parse (`PREVIEW_CONFIG_BLOCK_UNSUPPORTED`) |
+| `reorder` | move one entry to another position | `PLAN_OPERATION_NOOP` when `fromIndex === toIndex`, `PLAN_ENTRY_INDEX_INVALID` for a zero index |
+| `disable-conflicting` | disable the **later-installed** party of a conflict | `PLAN_CONFLICT_PROVENANCE_INVALID` when `keepIndex < disableIndex`, `PLAN_CONFLICT_ID_INVALID` |
+| `patch-insert` | insert a new entry line after a position | `PLAN_ENTRY_INDEX_INVALID` below zero, `PLAN_ENTRY_ID_INVALID`; writes exactly `- id: …` and invents no config |
+
+Two properties matter more than the table. First, the vocabulary is **version-scoped**:
+`0.1` still means its single operation, and a `0.1` plan naming `patch-insert` is
+refused with `PLAN_OPERATION_UNSUPPORTED` instead of being read with `0.2` rules.
+Second, a `0.2` postcondition pins **bytes only** (`documentSha256`). The
+`entryIndex`/`field`/`value` coordinates were the `0.1` way of pinning a single edit;
+keeping them would have meant one field meaning different things per operation, so they
+are gone and a `0.2` postcondition carrying them is refused.
+
+`disable-conflicting` takes its provenance from the caller — a conflict id plus which
+index to disable and which to keep. This package cannot observe an installation order,
+so the plan carries `CONFLICT_PROVENANCE_IS_CALLER_SUPPLIED_AND_UNVERIFIED` in its own
+limitations rather than implying the pairing was checked.
+
 ## What this package does **not** establish
 
 - That any repair is safe, correct, approved, or desirable.
@@ -103,7 +129,7 @@ document untouched.
 
 ```bash
 cd projects/dsh-compat-platform/packages/repair
-node --test --test-concurrency=1 "tests/*.test.js"
+node --test --test-concurrency=1 "tests/*.test.js"   # 68 tests, no dependencies
 
 cd ../..
 node examples/repair/preview.mjs

@@ -1,0 +1,37 @@
+{
+  "name": "dsh-compat-lifecycle-bootstrap",
+  "version": "0.1.0-draft.1",
+  "type": "module",
+  "description": "Runs a plugin's declared post-install script after it appears in the plugin manager, and merges its generated patch block into the profile patch file.",
+  "engines": {
+    "node": ">=24.9.0"
+  },
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./manifest": "./src/lifecycle-manifest.js",
+    "./runner": "./src/lifecycle-runner.js",
+    "./patch-merge": "./src/patch-merge.js",
+    "./bootstrap": "./src/lifecycle-bootstrap.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/",
+    "README.md"
+  ],
+  "dsh": {
+    "lifecycle-bootstrap": {
+      "inject": [
+        "pluginManager"
+      ]
+    }
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 \"tests/*.test.js\""
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lbn2011/dsh-compat-platform.git"
+  }
+}

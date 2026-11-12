@@ -180,3 +180,83 @@ export type {
   AdmissionDiagnostics,
   AdmissionEvidenceValidator,
 } from './admission-diagnostics.js';
+
+/**
+ * A1 — live occupancy and the C1–C11 conflict taxonomy.
+ *
+ * `createConflictDetector` is the pure engine: claims in, occupancy table and
+ * conflict records out, no host access. `createConflictService` wires that engine to
+ * the four DSH change signals and is the only module here that subscribes to
+ * anything. Event payloads are treated as triggers only — none of the four carries
+ * occupancy, so a refresh re-reads a collector instead of parsing the event.
+ */
+export {
+  createConflictDetector,
+  satisfiesRange,
+  CONFLICT_CODES,
+  CONFLICT_DETECTOR_VERSION,
+  CONFLICT_LIMITATIONS,
+  CONFLICT_SEVERITIES,
+  CONFLICT_TYPES,
+  DEFAULT_SEVERITY,
+  OCCUPANCY_KINDS,
+} from './conflict-detector.js';
+
+export type {
+  ConflictClaim,
+  ConflictClaimInput,
+  ConflictCode,
+  ConflictDetector,
+  ConflictDetectorOptions,
+  ConflictFailure,
+  ConflictLimitation,
+  ConflictRecord,
+  ConflictSeverity,
+  ConflictSnapshot,
+  OccupancyKind,
+  OccupancySnapshot,
+  OccupancyTable,
+} from './conflict-detector.js';
+
+export {
+  createConflictService,
+  CONFLICT_EVENTS,
+  CONFLICT_SERVICE_VERSION,
+  OCCUPANCY_SIGNALS,
+} from './conflict-service.js';
+
+export type {
+  CollectedClaim,
+  ConflictDetectedPayload,
+  ConflictResolvedPayload,
+  ConflictService,
+  ConflictServiceContext,
+  ConflictServiceError,
+  ConflictServiceOptions,
+  PluginManagerLike,
+  ToolsLike,
+} from './conflict-service.js';
+
+// A2 — static pre-check.
+export {
+  staticPreCheck,
+  preCheckExitCode,
+  preCheckFailure,
+  PRE_CHECK_CODES,
+  PRE_CHECK_EXIT,
+  PRE_CHECK_LIMITATIONS,
+  PRE_CHECK_SCHEMA,
+  PRE_CHECK_VERSION,
+} from './pre-check.js';
+
+export type {
+  PreCheckCode,
+  PreCheckFinding,
+  PreCheckInput,
+  PreCheckLimitation,
+  PreCheckManifestSummary,
+  PreCheckOccupancyClaim,
+  PreCheckResult,
+  PreCheckSummary,
+  PreCheckTotals,
+} from './pre-check.js';

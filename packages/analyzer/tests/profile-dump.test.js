@@ -835,6 +835,8 @@ describe('profile-dump — rows are a closed window, not an inventory', () => {
     assert.deepEqual(summary.rows[0], {
       index: 1,
       line: 2,
+      layer: 1,
+      patched: false,
       keyCount: 3,
       idKind: 'string',
       nameKind: 'string',

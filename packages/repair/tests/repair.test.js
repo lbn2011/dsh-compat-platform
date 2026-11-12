@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  OPERATION_KINDS,
   PLAN_VERSION,
+  PLAN_VERSIONS,
   PLAN_KEYS,
   PLAN_LIMITATIONS,
   PLAN_ISSUE_CODES,
@@ -29,18 +31,20 @@ const BEFORE = '# fixture profile\n- id: alpha\n  name: ./plugin-a.mjs\n  disabl
 function planFor(options = {}) {
   const before = options.before ?? BEFORE;
   const value = options.value ?? true;
+  const entryIndex = options.entryIndex ?? 1;
   const after = options.after
     ?? before.replace(`  disabled: ${!value}`, `  disabled: ${value}`);
+  const planVersion = options.planVersion ?? PLAN_VERSION;
+  // 0.1 carried the postcondition coordinates; 0.2 pins bytes only. Building each
+  // shape explicitly keeps the version contract visible in the fixture itself.
+  const expectedPostcondition = planVersion === 'repair-plan/0.1-draft.1'
+    ? { documentSha256: textDigest(after), entryIndex, field: 'disabled', value }
+    : { documentSha256: textDigest(after) };
   return {
-    planVersion: PLAN_VERSION,
-    operation: { kind: 'set-entry-flag', entryIndex: options.entryIndex ?? 1, field: 'disabled', value },
+    planVersion,
+    operation: { kind: 'set-entry-flag', entryIndex, field: 'disabled', value },
     precondition: { documentSha256: textDigest(before), revision: 'fixture-v1' },
-    expectedPostcondition: {
-      documentSha256: textDigest(after),
-      entryIndex: options.entryIndex ?? 1,
-      field: 'disabled',
-      value,
-    },
+    expectedPostcondition,
   };
 }
 
@@ -77,26 +81,41 @@ test('a non-record plan is refused with one code', () => {
   }
 });
 
-test('the version literal is exact', () => {
-  assert.equal(PLAN_VERSION, 'repair-plan/0.1-draft.1');
-  assert.deepEqual(codesOf({ ...planFor(), planVersion: 'repair-plan/0.2-draft.1' }), ['PLAN_VERSION_UNSUPPORTED']);
+test('the version literal is exact and every declared version is accepted', () => {
+  assert.equal(PLAN_VERSION, 'repair-plan/0.2-draft.1');
+  assert.deepEqual(PLAN_VERSIONS, ['repair-plan/0.1-draft.1', 'repair-plan/0.2-draft.1']);
+  for (const planVersion of PLAN_VERSIONS) {
+    assert.equal(validateRepairPlan(planFor({ planVersion })).valid, true, planVersion);
+  }
+  assert.deepEqual(codesOf({ ...planFor(), planVersion: 'repair-plan/0.9-draft.1' }), ['PLAN_VERSION_UNSUPPORTED']);
 });
 
-test('the operation vocabulary has exactly one member and refuses others', () => {
-  const plan = planFor();
-  plan.operation.kind = 'rewrite-document';
-  assert.deepEqual(codesOf(plan), ['PLAN_OPERATION_UNSUPPORTED']);
+test('the operation vocabulary is closed at five members and scoped by version', () => {
+  assert.deepEqual(OPERATION_KINDS, [
+    'set-entry-flag',
+    'set-entry-config',
+    'reorder',
+    'disable-conflicting',
+    'patch-insert',
+  ]);
+
+  const unknown = planFor();
+  unknown.operation = { kind: 'rewrite-document' };
+  assert.deepEqual(codesOf(unknown), ['PLAN_OPERATION_UNSUPPORTED']);
+
+  // A 0.1 plan that names a 0.2 operation is refused rather than reinterpreted.
+  const scoped = planFor({ planVersion: 'repair-plan/0.1-draft.1' });
+  scoped.operation = { kind: 'patch-insert', afterIndex: 0, entryId: 'gamma' };
+  assert.ok(codesOf(scoped).includes('PLAN_OPERATION_UNSUPPORTED'));
 });
 
 test('only the disabled field may be set, and only to a boolean', () => {
   const wrongField = planFor();
   wrongField.operation.field = 'group';
-  wrongField.expectedPostcondition.field = 'group';
   assert.ok(codesOf(wrongField).includes('PLAN_FIELD_UNSUPPORTED'));
 
   const wrongValue = planFor();
   wrongValue.operation.value = 'true';
-  wrongValue.expectedPostcondition.value = 'true';
   assert.ok(codesOf(wrongValue).includes('PLAN_VALUE_UNSUPPORTED'));
 });
 
@@ -104,7 +123,6 @@ test('entry indexes are 1-based integers', () => {
   for (const index of [0, -1, 1.5, '1', null]) {
     const plan = planFor();
     plan.operation.entryIndex = index;
-    plan.expectedPostcondition.entryIndex = index;
     assert.ok(codesOf(plan).includes('PLAN_ENTRY_INDEX_INVALID'), `index ${String(index)}`);
   }
 });
@@ -127,10 +145,16 @@ test('a revision label must be a non-empty bounded string', () => {
   }
 });
 
-test('a postcondition that disagrees with the operation is refused', () => {
-  const plan = planFor();
+test('a 0.1 postcondition that disagrees with the operation is refused', () => {
+  const plan = planFor({ planVersion: 'repair-plan/0.1-draft.1' });
   plan.expectedPostcondition.value = false;
   assert.deepEqual(codesOf(plan), ['PLAN_POSTCONDITION_MISMATCH']);
+});
+
+test('a 0.2 postcondition may not carry the retired coordinate keys', () => {
+  const plan = planFor();
+  plan.expectedPostcondition.entryIndex = 1;
+  assert.deepEqual(codesOf(plan), ['PLAN_POSTCONDITION_UNKNOWN_FIELD']);
 });
 
 test('nested members with unknown keys are refused by their own codes', () => {
@@ -207,7 +231,6 @@ test('an entry index beyond the document is refused, not clamped', () => {
   const before = '- id: alpha\n  disabled: false\n';
   const plan = planFor({ before, entryIndex: 1 });
   plan.operation.entryIndex = 9;
-  plan.expectedPostcondition.entryIndex = 9;
   const verdict = previewRepair({ plan, beforeText: before });
   assert.equal(verdict.verdict, 'refused');
   assert.deepEqual(verdict.reasons, ['PREVIEW_ENTRY_NOT_FOUND']);

@@ -40,13 +40,19 @@ export const PAGE_CONTENT_TYPE = 'text/html; charset=utf-8'
  *
  * @returns {string} The complete HTML document.
  */
-export function renderPage() {
+export function renderPage(envelopeRoutePath = '/compat-diagnostics/envelope') {
+  // Encode for an inline script, not HTML: a configured path must never close
+  // the script element or introduce JavaScript source.
+  const envelopeUrlLiteral = JSON.stringify(envelopeRoutePath)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'none'; form-action 'none'; base-uri 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self' ws:; img-src 'none'; form-action 'none'; base-uri 'none'">
 <title>兼容性诊断 · 只读</title>
 <style>
 /* ── design tokens ─────────────────────────────────────────── */
@@ -190,6 +196,51 @@ pre{
   background:var(--surface-0);border:1px solid var(--line);border-radius:var(--r-md);
   font-size:var(--tx-xs);line-height:1.55;
 }
+/* ── buttons ───────────────────────────────────────────── */
+button{
+  padding:var(--sp-sm) var(--sp-lg);border:1px solid var(--line);
+  border-radius:var(--r-full);background:var(--surface-3);
+  color:var(--ink);font:inherit;font-size:var(--tx-sm);
+  cursor:pointer;transition:background .15s,border-color .15s;
+}
+button:hover{background:var(--surface-4);border-color:var(--accent-dim);}
+button:active{background:var(--surface-2);}
+button:disabled{opacity:.5;cursor:not-allowed;}
+button.primary{background:var(--accent);border-color:var(--accent);color:#000;font-weight:600;}
+button.primary:hover{background:var(--accent-dim);border-color:var(--accent-dim);}
+.btn-group{display:flex;gap:var(--sp-sm);flex-wrap:wrap;margin-top:var(--sp-md);}
+/* ── live tools ────────────────────────────────────────── */
+.ws-status{
+  display:inline-flex;align-items:center;gap:var(--sp-xs);
+  padding:var(--sp-xs) var(--sp-md);border-radius:var(--r-full);
+  font-size:var(--tx-xs);font-weight:600;
+  background:var(--surface-3);border:1px solid var(--line);
+}
+.ws-status::before{
+  content:"";display:block;width:.5rem;height:.5rem;
+  border-radius:50%;background:var(--ink-faint);
+}
+.ws-status.connected::before{background:var(--good);box-shadow:0 0 8px var(--good);}
+.ws-status.connecting::before{background:var(--warn);animation:pulse 1.5s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+.log-list{
+  margin:var(--sp-md) 0 0;padding:var(--sp-md);
+  background:var(--surface-0);border:1px solid var(--line);
+  border-radius:var(--r-md);max-height:24rem;overflow-y:auto;
+  font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  font-size:var(--tx-xs);line-height:1.55;
+}
+.log-list:empty::before{content:"无日志";color:var(--ink-faint);}
+.log-entry{margin:var(--sp-xs) 0;padding:var(--sp-xs);border-radius:var(--r-sm);}
+.log-entry .time{color:var(--ink-faint);margin-right:var(--sp-sm);}
+.log-entry .level{
+  display:inline-block;min-width:3.5rem;margin-right:var(--sp-sm);
+  font-weight:600;text-align:center;
+}
+.log-entry .level.error{color:var(--bad);}
+.log-entry .level.warn{color:var(--warn);}
+.log-entry .level.info{color:var(--accent);}
+.log-entry .msg{color:var(--ink);}
 /* ── fixed footer ──────────────────────────────────────────── */
 footer{
   position:fixed;inset:auto 0 0 0;padding:var(--sp-sm) var(--sp-lg);
@@ -198,6 +249,18 @@ footer{
   backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
 }
 footer .wrap{max-width:66rem;margin:0 auto;}
+/* Narrow embedded panels must not inherit a 20rem minimum track width. */
+.grid > *{min-width:0;}
+summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px;}
+@media(max-width:40rem){
+  .grid{grid-template-columns:minmax(0,1fr);}
+  dl.rows{grid-template-columns:minmax(0,1fr);}
+  dl.rows dd{margin-bottom:var(--sp-sm);}
+  footer{position:static;}
+}
+@media(prefers-reduced-motion:reduce){
+  .card{transition:none;}
+}
 </style>
 </head>
 <body>
@@ -245,6 +308,35 @@ footer .wrap{max-width:66rem;margin:0 auto;}
     <h2>后续步骤</h2>
     <div class="panel"><ul class="plain" id="nextSteps"><li class="muted">加载中…</li></ul></div>
   </section>
+
+  <section>
+    <h2>实时诊断工具</h2>
+    <p class="muted">
+      这些工具直接读取主机当前状态，不依赖信封文件。快照采集和前端日志适用于活跃会话的实时诊断。
+    </p>
+    <div class="panel">
+      <h3>页面快照</h3>
+      <p class="muted">采集当前页面状态的结构化快照（会话、插件、服务、Slot 等）。</p>
+      <div class="btn-group">
+        <button id="btnSnapshot" class="primary">采集快照</button>
+      </div>
+      <details id="snapshotResult" style="margin-top:var(--sp-md);">
+        <summary>快照结果</summary>
+        <pre id="snapshotOutput"></pre>
+      </details>
+    </div>
+
+    <div class="panel" style="margin-top:var(--sp-lg);">
+      <h3>前端日志流 <span class="ws-status" id="wsStatus">未连接</span></h3>
+      <p class="muted">实时接收浏览器前端通过 WebSocket 上报的日志。日志环形缓冲最多保留 100 条。</p>
+      <div class="btn-group">
+        <button id="btnLogConnect">连接日志流</button>
+        <button id="btnLogDisconnect" disabled>断开</button>
+        <button id="btnLogClear">清空显示</button>
+      </div>
+      <div class="log-list" id="logList"></div>
+    </div>
+  </section>
 </div>
 
 <footer>
@@ -259,7 +351,7 @@ footer .wrap{max-width:66rem;margin:0 auto;}
 (function () {
   'use strict';
 
-  var ENVELOPE_URL = '/compat-diagnostics/envelope';
+  var ENVELOPE_URL = ${envelopeUrlLiteral};
 
   // Chinese glosses. The machine word is always printed beside the gloss, so a
   // translation can never be mistaken for the value in the document.
@@ -521,6 +613,119 @@ footer .wrap{max-width:66rem;margin:0 auto;}
     .catch(function (error) {
       fail(String(error));
     });
+
+  // ── Live tools: page snapshot & frontend log ──────────────────────
+  var btnSnapshot = document.getElementById('btnSnapshot');
+  var snapshotResult = document.getElementById('snapshotResult');
+  var snapshotOutput = document.getElementById('snapshotOutput');
+
+  btnSnapshot.addEventListener('click', function () {
+    btnSnapshot.disabled = true;
+    btnSnapshot.textContent = '采集中...';
+    snapshotOutput.textContent = '';
+    snapshotResult.open = false;
+
+    fetch('/api/page-snapshot', { headers: { accept: 'application/json' }, cache: 'no-store' })
+      .then(function (response) {
+        return response.text().then(function (text) {
+          if (!response.ok) {
+            snapshotOutput.textContent = 'HTTP ' + response.status + '\\n' + text;
+            snapshotResult.open = true;
+            return null;
+          }
+          try {
+            var data = JSON.parse(text);
+            snapshotOutput.textContent = JSON.stringify(data, null, 2);
+            snapshotResult.open = true;
+            return data;
+          } catch (error) {
+            snapshotOutput.textContent = '响应不是 JSON: ' + String(error) + '\\n' + text;
+            snapshotResult.open = true;
+            return null;
+          }
+        });
+      })
+      .catch(function (error) {
+        snapshotOutput.textContent = String(error);
+        snapshotResult.open = true;
+      })
+      .finally(function () {
+        btnSnapshot.disabled = false;
+        btnSnapshot.textContent = '采集快照';
+      });
+  });
+
+  var wsStatus = document.getElementById('wsStatus');
+  var btnLogConnect = document.getElementById('btnLogConnect');
+  var btnLogDisconnect = document.getElementById('btnLogDisconnect');
+  var btnLogClear = document.getElementById('btnLogClear');
+  var logList = document.getElementById('logList');
+  var ws = null;
+
+  function setWsStatus(status, text) {
+    wsStatus.className = 'ws-status ' + status;
+    wsStatus.textContent = text;
+  }
+
+  function addLogEntry(time, level, msg) {
+    var entry = el('div', 'log-entry');
+    entry.appendChild(el('span', 'time', time));
+    entry.appendChild(el('span', 'level ' + level, level.toUpperCase()));
+    entry.appendChild(el('span', 'msg', msg));
+    logList.appendChild(entry);
+    logList.scrollTop = logList.scrollHeight;
+  }
+
+  btnLogConnect.addEventListener('click', function () {
+    if (ws) return;
+    btnLogConnect.disabled = true;
+    setWsStatus('connecting', '连接中...');
+
+    var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var wsUrl = protocol + '//' + window.location.host + '/api/frontend-log';
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = function () {
+      setWsStatus('connected', '已连接');
+      btnLogDisconnect.disabled = false;
+      addLogEntry(new Date().toLocaleTimeString(), 'info', 'WebSocket 已连接');
+    };
+
+    ws.onmessage = function (event) {
+      try {
+        var msg = JSON.parse(event.data);
+        if (msg && msg.time && msg.level && msg.message) {
+          var time = new Date(msg.time).toLocaleTimeString();
+          addLogEntry(time, msg.level, msg.message);
+        }
+      } catch (error) {
+        addLogEntry(new Date().toLocaleTimeString(), 'error', '解析日志失败: ' + String(error));
+      }
+    };
+
+    ws.onerror = function () {
+      addLogEntry(new Date().toLocaleTimeString(), 'error', 'WebSocket 连接错误');
+    };
+
+    ws.onclose = function () {
+      setWsStatus('', '未连接');
+      btnLogConnect.disabled = false;
+      btnLogDisconnect.disabled = true;
+      addLogEntry(new Date().toLocaleTimeString(), 'info', 'WebSocket 已断开');
+      ws = null;
+    };
+  });
+
+  btnLogDisconnect.addEventListener('click', function () {
+    if (ws) {
+      ws.close();
+      ws = null;
+    }
+  });
+
+  btnLogClear.addEventListener('click', function () {
+    logList.replaceChildren();
+  });
 }());
 </script>
 </body>

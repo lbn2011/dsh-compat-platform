@@ -32,12 +32,8 @@ function planFor(options = {}) {
     planVersion: PLAN_VERSION,
     operation: { kind: 'set-entry-flag', entryIndex: 1, field: 'disabled', value },
     precondition: { documentSha256: textDigest(BEFORE), revision: 'fixture-v1' },
-    expectedPostcondition: {
-      documentSha256: options.expected ?? textDigest(AFTER),
-      entryIndex: 1,
-      field: 'disabled',
-      value,
-    },
+    // 0.2 pins bytes only: the coordinates moved out of the postcondition.
+    expectedPostcondition: { documentSha256: options.expected ?? textDigest(AFTER) },
   };
 }
 

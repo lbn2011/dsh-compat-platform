@@ -85,19 +85,72 @@ absolute origin, touches no process API, and prints `certification: false` and
 `correlation: not-established` above any data. Its CSP is
 `default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'none'; form-action 'none'; base-uri 'none'`.
 
+## The two diagnostic endpoints (E1)
+
+`src/api.js` mounts two read-only routes when the composition provides a `connection`
+service, and mounts **nothing** when it does not — a plugin whose routes cannot inherit
+the carrier's trust policy must not invent its own.
+
+| Route | Shape | Transport |
+| --- | --- | --- |
+| `GET /api/page-snapshot` | `{ pageSnapshot, sources, counts, truncated, messages, plugins, slots, activeSession, codes, limitations, certification }` | `connection.fetch.register` |
+| `/api/frontend-log` | `{ entries, maxEntries, dropped, codes }`, plus a WebSocket upgrade carrying page log lines | `connection.fetch.register` **and** `webServer.registerUpgrade` |
+
+**A snapshot is assembled from host state, not observed in a browser.** `src/page-snapshot.js`
+is a pure function over lists the caller passes (`sessions`, `messages`, `plugins`,
+`slots`, `activeSessionId`, `includeMessageText`); the adapter in `src/api.js` collects
+those lists from `sessionQuery`/`sessions`, `pluginManager` and a slot cache fed by
+`slots/changed`. There is no DOM read, no screenshot and no rendering: the limitation
+list says so in `SNAPSHOT_IS_STRUCTURE_NOT_A_DOM_OR_A_SCREENSHOT` and
+`SNAPSHOT_IS_ASSEMBLED_FROM_HOST_STATE_NOT_OBSERVED_IN_A_BROWSER`.
+
+The design decision worth stating: **an absent source is not an empty list.** When a
+service is missing the snapshot reports `sources.<part> = 'unavailable'` plus a code
+(`SESSIONS_UNAVAILABLE`, `MESSAGES_UNAVAILABLE`, `PLUGINS_UNAVAILABLE`,
+`SLOTS_UNAVAILABLE`) instead of `[]`, because "I could not see it" and "it is empty" are
+different facts and a reader must be able to tell them apart. Message text is withheld
+(`text: null`, `textLength: n`) unless the composition sets `includeMessageText`, and
+every bounded list reports its pre-bound total with `*_TRUNCATED` next to the bound.
+
+`src/frontend-log.js` is the page half, hand-written to RFC 6455 with zero
+dependencies: `acceptKey`/`handshakeResponse` for the upgrade, a masked-frame decoder
+that reassembles a frame split across TCP chunks, and explicit refusals for unmasked
+frames, fragmented messages, unknown opcodes and an announced length over the 64 KiB
+ceiling **before** allocating it. Parsed entries go into a 100-entry ring; each entry is
+frozen, and an over-long field is truncated and flagged rather than stored whole. A page
+cannot smuggle extra fields: only `level`, `message`, `stack` and `source` survive the
+parse.
+
+`scripts/host-api-batch` covers these routes. One bounded round on 2026-11-12 ran green
+(`/data/dsh-ecosystem-test-artifacts/runs/20261112T153350Z-host-api-batch-1720994-2776`):
+`acceptance_exit=0`, `tap_tests=54 tap_pass=54 tap_fail=0`, `acc_static_contract=pass`,
+`memory_peak=41201664` and `pids_peak=20` both measured. The 28 endpoint tests in
+`tests/api.test.js` are matched name-by-name against the TAP headers, so the total is not
+standing in for a file that failed to load. Receipts: `docs/testing/2026-11-12-repair-d2-e1.md` §3.
+
 ## Tests
 
 ```
 node --test --test-concurrency=1 "tests/*.test.js"
 ```
 
-22 tests, no dependencies: a fake carrier records the two registrations, the
-real handlers run against real files written into `mkdtemp`, the browser half is
-executed inside a stand-in module loader to check what it registers, and the page's
-own inline script runs inside a minimal DOM so a node stringified into
-`textContent` fails a test instead of reaching a reader. They do
-**not** boot the carrier, listen on a socket, run a browser, or render anything —
-that is the batch's job and the record's non-claim.
+Currently **54 tests by static count** — 26 across `tests/gui.test.js` and
+`tests/client.test.js`, 28 in `tests/api.test.js` — no dependencies, in two groups with
+two different stand-ins. No bounded round has counted this file yet, so the 22 in the
+2026-11-11 records below is what that round measured then, not today's count.
+
+The page/envelope tests use a fake carrier that records the two registrations; the real
+handlers run against real files written into `mkdtemp`, the browser half is executed
+inside a stand-in module loader to check what it registers, and the page's own inline
+script runs inside a minimal DOM so a node stringified into `textContent` fails a test
+instead of reaching a reader. They do **not** boot the carrier or run a browser.
+
+The endpoint tests include one real `node:net` server and client: the upgrade request is
+sent as bytes, the accept header is compared against the RFC 6455 example value, and a
+masked client frame has to arrive in the ring before that case passes. Everything else
+in those tests runs against in-memory transcript doubles. No case boots the real DSH
+carrier, renders a page, or reaches a real browser — that is the batch's job and the
+record's non-claim.
 
 ## The browser half
 

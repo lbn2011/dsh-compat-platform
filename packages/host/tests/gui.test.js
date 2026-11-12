@@ -16,6 +16,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { ENVELOPE_BYTE_CEILING, checkEnvelopeShape, readEnvelope } from '../src/envelope.js'
+import { renderPage } from '../src/page.js'
 import {
   DEFAULT_ENVELOPE_PATH,
   DEFAULT_PAGE_PATH,
@@ -363,6 +364,8 @@ test('the inline script prints words and glosses, never a DOM node as text', asy
         node.children = kids
         node.text = null
       },
+      addEventListener() {},
+      removeEventListener() {},
       get lastChild() {
         return node.children[node.children.length - 1]
       },
@@ -428,5 +431,183 @@ test('the inline script prints words and glosses, never a DOM node as text', asy
   assert.ok(
     rendered.includes('No file was named for this source; the envelope says nothing about it.'),
     'the envelope sentence survives verbatim',
+  )
+})
+
+// ── the envelope route as an inlined JS literal ─────────────────────────────
+// The route name comes from configuration and is embedded in a <script> element.
+// The page must neither let it end that element nor smuggle a statement into it.
+// Every helper below parses the served page and EXECUTES the shipped script, so
+// these tests see what the browser sees; matching the HTML text alone would not
+// show whether a literal was truncated, escaped twice or terminated early.
+
+function pageDocument() {
+  const byId = new Map()
+  const makeNode = (tag) => {
+    const node = {
+      tagName: tag,
+      className: '',
+      children: [],
+      text: null,
+      appendChild(child) {
+        node.children.push(child)
+        node.text = null
+        return child
+      },
+      replaceChildren(...kids) {
+        node.children = kids
+        node.text = null
+      },
+      addEventListener() {},
+      removeEventListener() {},
+      get lastChild() {
+        return node.children[node.children.length - 1]
+      },
+      get textContent() {
+        if (node.children.length > 0) return node.children.map((child) => child.textContent).join('')
+        return node.text === null ? '' : node.text
+      },
+      set textContent(value) {
+        node.text = String(value)
+        node.children = []
+      },
+    }
+    Object.defineProperty(node, 'nodeType', { value: 1 })
+    return node
+  }
+  return {
+    document: {
+      createElement: (tag) => makeNode(tag),
+      getElementById: (id) => {
+        if (!byId.has(id)) byId.set(id, makeNode('div'))
+        return byId.get(id)
+      },
+    },
+  }
+}
+
+// Exactly one <script> element, and the body between it and its closer.
+function pageScript(html) {
+  const opens = html.match(/<script>/g) ?? []
+  const closes = html.match(/<\/script>/g) ?? []
+  const script = /<script>([\s\S]*)<\/script>/.exec(html)
+  assert.equal(opens.length, 1, 'exactly one <script> element opens')
+  assert.equal(closes.length, 1, 'exactly one </script> closes it')
+  assert.ok(script, 'the single inline script carries a body')
+  return script[1]
+}
+
+// Run the shipped script against a stub DOM and record the URL it fetches.
+async function executePage(html, envelope = clearEnvelope()) {
+  const body = pageScript(html)
+  const vm = await import('node:vm')
+  const { document } = pageDocument()
+  const fetched = []
+  const fetchStub = (url) => {
+    fetched.push(url)
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify(envelope)),
+    })
+  }
+  vm.runInNewContext(body, {
+    document,
+    fetch: fetchStub,
+    JSON,
+    Object,
+    Array,
+    String,
+    Error,
+    Date,
+    window: { location: { protocol: 'http:', host: 'localhost' } },
+    WebSocket: function () { return { close() {}, onopen: null, onmessage: null, onerror: null, onclose: null } },
+  })
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  return { fetched, body }
+}
+
+test('the page fetches the exact route it serves, default and custom', async () => {
+  const byDefault = await executePage(renderPage())
+  assert.deepEqual(byDefault.fetched, [DEFAULT_ENVELOPE_PATH])
+
+  const byCustom = await executePage(renderPage('/ops/private/envelope'))
+  assert.deepEqual(byCustom.fetched, ['/ops/private/envelope'])
+})
+
+test('a route cannot end the inline script or smuggle a second element', async () => {
+  const payloads = [
+    '/e</script><script>alert(1)</script>',
+    '/e</script ><img src=x onerror=alert(1)>',
+    '/e\u2028\u2029middle',
+    '/e"quoted\'/back\\slash',
+  ]
+  for (const payload of payloads) {
+    const html = renderPage(payload)
+    const { fetched, body } = await executePage(html)
+    const label = JSON.stringify(payload)
+    // One element, whatever the route contains: the injected markup must be
+    // escaped inside the literal, not emitted as tags.
+    assert.equal((html.match(/<\/script>/g) ?? []).length, 1, `a single closer for ${label}`)
+    assert.ok(!body.includes('</script'), `the script body never closes itself for ${label}`)
+    assert.ok(!/[\u2028\u2029]/.test(body), `no raw line separator survives for ${label}`)
+    // The literal round-trips exactly, and the script's own fetch proves the
+    // browser would ask for that very route rather than a truncated one.
+    assert.deepEqual(fetched, [payload], `the route survives verbatim for ${label}`)
+  }
+})
+
+test('a custom envelope route is registered as an exact route and reached by the page', async (t) => {
+  const { file } = await envelopeFile(t, clearEnvelope())
+  const carrier = makeCarrier()
+  apply(carrier.ctx, { envelopePath: file, envelopeRoutePath: '/ops/private/envelope' })
+
+  assert.deepEqual(
+    [...carrier.routes.keys()].sort(),
+    [DEFAULT_PAGE_PATH, '/ops/private/envelope'],
+    'the page keeps its default path and the JSON route moves with the config',
+  )
+
+  const page = await call(carrier.routes.get(DEFAULT_PAGE_PATH), makeRequest())
+  assert.equal(page.status, 200)
+  const { fetched } = await executePage(bodyText(page))
+  assert.deepEqual(fetched, ['/ops/private/envelope'], 'the page fetches the configured route')
+
+  // The configured route is a working route, not just a string in the page.
+  const envelope = await call(carrier.routes.get('/ops/private/envelope'), makeRequest())
+  assert.equal(envelope.status, 200)
+})
+
+test('the narrow-viewport, focus and motion rules ship in the page CSS', async () => {
+  // EXISTENCE ONLY. Nothing here renders, paints or measures: this is not a
+  // browser or visual acceptance. It guards the layout rules against silently
+  // disappearing from the stylesheet, which is the whole claim made here.
+  const style = /<style>([\s\S]*)<\/style>/.exec(renderPage())
+  assert.ok(style, 'the page carries one style element')
+  const css = style[1].replace(/\s+/g, ' ')
+
+  for (const rule of [
+    '.grid > *{min-width:0;}',
+    'summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px;}',
+  ]) {
+    assert.ok(css.includes(rule), `the stylesheet is missing ${rule}`)
+  }
+
+  const narrow = css.indexOf('@media(max-width:40rem){')
+  const motion = css.indexOf('@media(prefers-reduced-motion:reduce){')
+  assert.ok(narrow >= 0, 'the 40rem media query is present')
+  assert.ok(motion > narrow, 'the reduced-motion query follows the narrow one')
+
+  const narrowBlock = css.slice(narrow, motion)
+  for (const rule of [
+    '.grid{grid-template-columns:minmax(0,1fr);}',
+    'dl.rows{grid-template-columns:minmax(0,1fr);}',
+    'footer{position:static;}',
+  ]) {
+    assert.ok(narrowBlock.includes(rule), `the 40rem block is missing ${rule}`)
+  }
+  assert.ok(
+    css.slice(motion).includes('.card{transition:none;}'),
+    'reduced motion drops the card transition',
   )
 })

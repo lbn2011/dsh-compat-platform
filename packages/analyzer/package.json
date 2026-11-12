@@ -16,7 +16,8 @@
     "dsh-compat-profile-dump": "./src/profile-dump-cli.js",
     "dsh-compat-diagnose": "./src/diagnose-cli.js",
     "dsh-compat-dependency-shape": "./src/dependency-shape-cli.js",
-    "dsh-compat-correspondence": "./src/correspondence-cli.js"
+    "dsh-compat-correspondence": "./src/correspondence-cli.js",
+    "dsh-compat-pre-check": "./src/pre-check-cli.js"
   },
   "exports": {
     ".": {
@@ -58,6 +59,19 @@
       "default": "./src/correspondence.js"
     },
     "./correspondence-cli": "./src/correspondence-cli.js",
+    "./conflict-detector": {
+      "types": "./src/conflict-detector.d.ts",
+      "default": "./src/conflict-detector.js"
+    },
+    "./conflict-service": {
+      "types": "./src/conflict-service.d.ts",
+      "default": "./src/conflict-service.js"
+    },
+    "./pre-check": {
+      "types": "./src/pre-check.d.ts",
+      "default": "./src/pre-check.js"
+    },
+    "./pre-check-cli": "./src/pre-check-cli.js",
     "./package.json": "./package.json"
   },
   "files": [
