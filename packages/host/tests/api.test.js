@@ -15,8 +15,11 @@ import {
   createSlotCache,
 } from '../src/page-snapshot.js';
 import {
+  CONFLICT_REPORT_PATH,
   FRONTEND_LOG_PATH,
+  MAX_REPAIR_BODY_BYTES,
   PAGE_SNAPSHOT_PATH,
+  REPAIR_PREVIEW_PATH,
   collectHostSnapshot,
   createHostApi,
 } from '../src/api.js';
@@ -32,6 +35,7 @@ import {
   newKey,
   parseLogMessage,
 } from '../src/frontend-log.js';
+import { createConflictService } from '../../analyzer/src/conflict-service.js';
 
 /**
  * A masked client text frame, as a browser would send it.
@@ -406,7 +410,7 @@ test('a rejected admission never receives a handshake', () => {
 
   const upgrade = server.upgrades[0];
   upgrade.handler(
-    { method: 'GET', headers: { upgrade: 'websocket', 'sec-websocket-key': newKey() } },
+    { method: 'POST', headers: { upgrade: 'websocket', 'sec-websocket-key': newKey() } },
     { destroy: () => destroyed.push('destroy'), write: () => destroyed.push('write') },
   );
   assert.deepEqual(destroyed, ['destroy']);
@@ -453,7 +457,7 @@ test('disposal removes every route and is idempotent', () => {
   const connection = fakeConnection();
   const server = fakeWebServer();
   const handle = createHostApi({ connection, webServer: server, on: () => () => {} });
-  assert.equal(connection.routes.length, 2);
+  assert.equal(connection.routes.length, 6);  // snapshot, log, conflict-report, repair-targets, repair-preview, repair-apply
   assert.equal(server.upgrades.length, 1);
   handle.dispose();
   handle.dispose();
@@ -543,4 +547,212 @@ test('a real socket completes the handshake and delivers a logged entry', async 
   client.destroy()
   await new Promise((resolveClose) => server.close(resolveClose))
   handle.dispose()
+})
+
+// ===== CONFLICT-REPORT AND REQUEST-BODY TESTS (repair routes: repair-api.test.js) =====
+
+test('conflict-report returns 503 when conflictService is absent', async () => {
+  const connection = fakeConnection()
+  createHostApi({ connection, webServer: fakeWebServer(), on: () => () => {} })
+  const route = connection.routes.find((entry) => entry.path === CONFLICT_REPORT_PATH)
+  assert.ok(route)
+  assert.deepEqual(route.methods, ['GET'])
+  const response = await route.fetch(new Request('http://127.0.0.1/api/conflict-report'))
+  assert.equal(response.status, 503)
+  const body = await response.json()
+  assert.equal(body.code, 'CONFLICT_SERVICE_UNAVAILABLE')
+})
+
+test('conflict-report returns claims and conflicts with a summary', async () => {
+  const connection = fakeConnection()
+  const claims = [
+    { kind: 'service', key: 'tools', owner: 'plugin-a', uid: 1 },
+    { kind: 'tool', key: 'grep', owner: 'plugin-b', uid: 2 },
+  ]
+  const conflicts = [
+    { id: 'C2|tool|grep|a,b', severity: 'high' },
+  ]
+  const ctx = {
+    connection,
+    webServer: fakeWebServer(),
+    on: () => () => {},
+    conflictService: {
+      claims: async () => claims,
+      conflicts: async () => conflicts,
+    },
+  }
+  createHostApi(ctx)
+  const route = connection.routes.find((entry) => entry.path === CONFLICT_REPORT_PATH)
+  const response = await route.fetch(new Request('http://127.0.0.1/api/conflict-report'))
+  assert.equal(response.status, 200)
+  const body = await response.json()
+  assert.deepEqual(body.claims, claims)
+  assert.deepEqual(body.conflicts, conflicts)
+  assert.deepEqual(body.summary.byKind, { service: 1, tool: 1 })
+  assert.deepEqual(body.summary.bySeverity, { high: 1 })
+})
+
+// R2: an unreadable conflict table is a 500 with a closed code, never `[]` + 200.
+for (const [label, service] of [
+  ['claims() throws', { claims: async () => { throw new Error('boom /secret/path') }, conflicts: async () => [] }],
+  ['conflicts() throws', { claims: async () => [], conflicts: () => { throw new Error('boom') } }],
+  ['snapshot() throws', { claims: () => [], snapshot: () => { throw new Error('boom') } }],
+  ['claims() is not an array', { claims: async () => ({}), conflicts: async () => [] }],
+  ['snapshot() has no conflicts array', { claims: () => [], snapshot: () => ({}) }],
+  ['no conflicts() nor snapshot()', { claims: () => [] }],
+]) {
+  test(`conflict-report answers 500 CONFLICT_SERVICE_ERROR when ${label}`, async () => {
+    const connection = fakeConnection()
+    const logged = []
+    createHostApi(
+      { connection, webServer: fakeWebServer(), on: () => () => {}, conflictService: service },
+      { onError: (code, error) => logged.push({ code, error }) },
+    )
+    const route = connection.routes.find((entry) => entry.path === CONFLICT_REPORT_PATH)
+    const response = await route.fetch(new Request('http://127.0.0.1/api/conflict-report'))
+    assert.equal(response.status, 500)
+    const body = await response.json()
+    // R12: the body carries the code only; the message goes to the server sink.
+    assert.deepEqual(body, { code: 'CONFLICT_SERVICE_ERROR' })
+    assert.equal(logged.length, 1)
+    assert.equal(logged[0].code, 'CONFLICT_SERVICE_ERROR')
+  })
+}
+
+test('conflict-report never leaks the thrown message to the response', async () => {
+  const connection = fakeConnection()
+  createHostApi(
+    {
+      connection,
+      webServer: fakeWebServer(),
+      on: () => () => {},
+      conflictService: { claims: () => { throw new Error('ENOENT /root/secret.db') }, conflicts: () => [] },
+    },
+    { onError: () => {} },
+  )
+  const route = connection.routes.find((entry) => entry.path === CONFLICT_REPORT_PATH)
+  const response = await route.fetch(new Request('http://127.0.0.1/api/conflict-report'))
+  const text = await response.text()
+  assert.equal(text.includes('secret'), false)
+  assert.equal(text.includes('ENOENT'), false)
+})
+
+test('conflict-report uses snapshot().conflicts when conflicts() is absent', async () => {
+  const connection = fakeConnection()
+  const ctx = {
+    connection,
+    webServer: fakeWebServer(),
+    on: () => () => {},
+    conflictService: {
+      claims: async () => [],
+      snapshot: async () => ({ conflicts: [{ id: 'C1', severity: 'blocker' }] }),
+    },
+  }
+  createHostApi(ctx)
+  const route = connection.routes.find((entry) => entry.path === CONFLICT_REPORT_PATH)
+  const response = await route.fetch(new Request('http://127.0.0.1/api/conflict-report'))
+  assert.equal(response.status, 200)
+  const body = await response.json()
+  assert.equal(body.conflicts.length, 1)
+  assert.equal(body.conflicts[0].id, 'C1')
+})
+
+// R9: the real conflict service, injected the way its plugin provides it
+// (`compatConflicts`, synchronous methods), produces a real C2 and a summary.
+test('conflict-report reads the real createConflictService as compatConflicts', async () => {
+  const service = createConflictService({})
+  service.upsert('plugin-a', [{ kind: 'tool', key: 'grep' }])
+  service.upsert('plugin-b', [{ kind: 'tool', key: 'grep' }])
+  const connection = fakeConnection()
+  createHostApi({ connection, webServer: fakeWebServer(), on: () => () => {}, compatConflicts: service })
+  const route = connection.routes.find((entry) => entry.path === CONFLICT_REPORT_PATH)
+  const response = await route.fetch(new Request('http://127.0.0.1/api/conflict-report'))
+  assert.equal(response.status, 200)
+  const body = await response.json()
+  assert.equal(body.claims.length, 2)
+  assert.equal(body.conflicts.length, 1)
+  assert.equal(body.conflicts[0].code, 'C2')
+  assert.equal(body.conflicts[0].kind, 'tool')
+  assert.equal(body.conflicts[0].key, 'grep')
+  assert.deepEqual(body.conflicts[0].owners.map((o) => o.owner).sort(), ['plugin-a', 'plugin-b'])
+  assert.deepEqual(body.summary.byKind, { tool: 2 })
+  assert.deepEqual(body.summary.bySeverity, { [body.conflicts[0].severity]: 1 })
+})
+
+// R11: an oversized body is refused before it is buffered whole.
+test('request body: a declared content-length over the cap is 413 without reading the body', async () => {
+  const connection = fakeConnection()
+  createHostApi({ connection, webServer: fakeWebServer(), on: () => () => {} }, {
+    repair: { root: '/nonexistent-root', documents: ['a.yml'] },
+  })
+  const route = connection.routes.find((entry) => entry.path === REPAIR_PREVIEW_PATH)
+  let touched = false
+  const fakeRequest = {
+    method: 'POST',
+    headers: new Headers({ 'content-length': String(MAX_REPAIR_BODY_BYTES + 1) }),
+    get body() {
+      touched = true
+      return null
+    },
+    text: async () => {
+      touched = true
+      return '{}'
+    },
+  }
+  const response = await route.fetch(fakeRequest)
+  assert.equal(response.status, 413)
+  assert.deepEqual(await response.json(), { code: 'BODY_TOO_LARGE' })
+  assert.equal(touched, false)
+})
+
+test('request body: an undeclared stream is cancelled once it passes the cap', async () => {
+  const connection = fakeConnection()
+  createHostApi({ connection, webServer: fakeWebServer(), on: () => () => {} }, {
+    repair: { root: '/nonexistent-root', documents: ['a.yml'] },
+  })
+  const route = connection.routes.find((entry) => entry.path === REPAIR_PREVIEW_PATH)
+  const chunk = new Uint8Array(64 * 1024).fill(0x20)
+  let pulled = 0
+  let cancelled = false
+  // Four times the cap is on offer; a reader that buffers whole would pull it all.
+  const stream = new ReadableStream({
+    pull(controller) {
+      if (pulled >= 4 * MAX_REPAIR_BODY_BYTES) {
+        controller.close()
+        return
+      }
+      pulled += chunk.byteLength
+      controller.enqueue(chunk)
+    },
+    cancel() {
+      cancelled = true
+    },
+  }, { highWaterMark: 0 })
+  const request = new Request('http://127.0.0.1/api/repair-preview', {
+    method: 'POST', body: stream, duplex: 'half',
+  })
+  const response = await route.fetch(request)
+  assert.equal(response.status, 413)
+  assert.deepEqual(await response.json(), { code: 'BODY_TOO_LARGE' })
+  assert.equal(cancelled, true)
+  assert.ok(pulled <= MAX_REPAIR_BODY_BYTES + 2 * chunk.byteLength, `pulled ${pulled} bytes`)
+})
+
+// R4: the host mounts no chrome-capture route and exports no way to mount one.
+test('the host api exports and mounts no chrome-capture route', async () => {
+  const api = await import('../src/api.js')
+  assert.equal('applyChromeCaptureApi' in api, false)
+  assert.equal('CHROME_CAPTURE_PATH' in api, false)
+  const connection = fakeConnection()
+  createHostApi({ on: () => () => {} }, { connection, webServer: fakeWebServer() })
+  assert.equal(connection.routes.some((r) => /chrome/i.test(r.path)), false)
+})
+
+// R3: the package description states the write path instead of "writes nothing".
+test('package.json describes the repair write path honestly', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  assert.doesNotMatch(pkg.description, /writes nothing/)
+  assert.match(pkg.description, /applyEnabled/)
+  assert.match(pkg.description, /approval/i)
 })

@@ -241,6 +241,30 @@ button.primary:hover{background:var(--accent-dim);border-color:var(--accent-dim)
 .log-entry .level.warn{color:var(--warn);}
 .log-entry .level.info{color:var(--accent);}
 .log-entry .msg{color:var(--ink);}
+/* ── conflict dashboard / repair preview (Phase 3–4) ─────────── */
+.filters{display:flex;gap:var(--sp-md);flex-wrap:wrap;align-items:center;margin-top:var(--sp-md);font-size:var(--tx-sm);}
+.filters label{display:inline-flex;gap:var(--sp-xs);align-items:center;cursor:pointer;}
+.conflict-list,.op-list{list-style:none;padding:0;margin:var(--sp-md) 0 0;display:grid;gap:var(--sp-sm);}
+.conflict{border:1px solid var(--line);border-left:4px solid var(--line);border-radius:var(--r-md);
+  padding:var(--sp-sm) var(--sp-md);background:var(--surface-3);}
+.conflict.sev-blocker{border-left-color:var(--bad);}
+.conflict.sev-high{border-left-color:#f59e0b;}
+.conflict.sev-medium,.conflict.sev-low{border-left-color:var(--warn);}
+.conflict .meta{font-size:var(--tx-xs);color:var(--ink-soft);display:flex;gap:var(--sp-sm);flex-wrap:wrap;}
+.op{border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:var(--r-md);
+  padding:var(--sp-sm) var(--sp-md);background:var(--surface-3);}
+.op.danger{border-left-color:var(--bad);background:var(--bad-bg);}
+.diff-removed{color:var(--bad);}
+.diff-added{color:var(--good);}
+.status-bar{margin-top:var(--sp-md);font-size:var(--tx-xs);color:var(--ink-soft);}
+.state-msg{margin-top:var(--sp-md);padding:var(--sp-sm) var(--sp-md);border-radius:var(--r-md);font-size:var(--tx-sm);}
+.state-msg.good{background:var(--good-bg);color:var(--good);}
+.state-msg.warn{background:var(--warn-bg);color:var(--warn);}
+.state-msg.bad{background:var(--bad-bg);color:var(--bad);}
+textarea.plan{width:100%;min-height:6rem;margin-top:var(--sp-sm);font-family:ui-monospace,monospace;
+  font-size:var(--tx-xs);background:var(--surface-1);color:var(--ink);border:1px solid var(--line);
+  border-radius:var(--r-md);padding:var(--sp-sm);}
+textarea.plan:focus-visible,.filters input:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
 /* ── fixed footer ──────────────────────────────────────────── */
 footer{
   position:fixed;inset:auto 0 0 0;padding:var(--sp-sm) var(--sp-lg);
@@ -335,6 +359,54 @@ summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px;}
         <button id="btnLogClear">清空显示</button>
       </div>
       <div class="log-list" id="logList"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>冲突仪表盘</h2>
+    <p class="muted">读取冲突服务当前的占用声明与冲突列表（<code>GET /api/conflict-report</code>）。服务未就绪时不会显示为“无冲突”。</p>
+    <div class="panel">
+      <div class="btn-group">
+        <button id="btnConflictRefresh" class="primary">刷新</button>
+        <label class="filters"><input type="checkbox" id="conflictAutoPoll"> 每 5 秒自动刷新</label>
+      </div>
+      <div class="filters" id="conflictFilters">
+        <span class="muted">严重度：</span>
+        <label><input type="checkbox" id="sevBlocker" checked> blocker</label>
+        <label><input type="checkbox" id="sevHigh" checked> high</label>
+        <label><input type="checkbox" id="sevMedium" checked> medium</label>
+        <label><input type="checkbox" id="sevLow" checked> low</label>
+      </div>
+      <div id="conflictState" class="state-msg" hidden></div>
+      <ul class="conflict-list" id="conflictList"></ul>
+      <div class="status-bar" id="conflictStatus">尚未检查</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Repair 操作预览</h2>
+    <p class="muted">先预览（<code>POST /api/repair-preview</code>），确认后再执行（<code>POST /api/repair-apply</code>）。文档由服务端按名字读取，只能选配置里允许的文档。执行要求服务端审批目录里已有该计划 planDigest 对应的审批文件；页面不提交审批。</p>
+    <div class="panel">
+      <label for="repairDocument" class="muted">文档（<code>GET /api/repair-targets</code>）</label>
+      <select id="repairDocument"></select>
+      <div id="repairTargetsState" class="state-msg" hidden></div>
+      <label for="repairPlan" class="muted">计划 JSON（只填计划对象本身，<code>repair-plan/0.2-draft.1</code>）</label>
+      <textarea id="repairPlan" class="plan" spellcheck="false" placeholder="{&quot;planVersion&quot;: &quot;repair-plan/0.2-draft.1&quot;, &quot;operation&quot;: {}}"></textarea>
+      <div class="btn-group">
+        <button id="btnRepairPreview" class="primary" disabled>加载预览</button>
+        <button id="btnRepairApply" disabled>执行修复</button>
+      </div>
+      <div id="repairState" class="state-msg" hidden></div>
+      <div id="repairDigests" class="meta" hidden></div>
+      <ul class="op-list" id="repairOps"></ul>
+      <details id="repairAfterBox" hidden>
+        <summary>修复后全文</summary>
+        <pre id="repairAfter"></pre>
+      </details>
+      <details id="repairResultBox">
+        <summary>执行结果</summary>
+        <pre id="repairResult"></pre>
+      </details>
     </div>
   </section>
 </div>
@@ -726,6 +798,360 @@ summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px;}
   btnLogClear.addEventListener('click', function () {
     logList.replaceChildren();
   });
+
+  // ── Shared helpers for Phase 3–4 ──────────────────────────────────
+  function showState(node, tone, text) {
+    if (!text) { node.hidden = true; node.className = 'state-msg'; node.textContent = ''; return; }
+    node.hidden = false;
+    node.className = 'state-msg ' + tone;
+    node.textContent = text;
+  }
+
+  function readJson(response) {
+    return response.text().then(function (text) {
+      var data = null;
+      try { data = JSON.parse(text); } catch (error) { data = null; }
+      return { ok: response.ok, status: response.status, data: data, text: text };
+    });
+  }
+
+  function codeSuffix(data) {
+    return data && typeof data.code === 'string' ? ' ' + data.code : '';
+  }
+
+  // ── Phase 3: conflict dashboard ───────────────────────────────────
+  var btnConflictRefresh = document.getElementById('btnConflictRefresh');
+  var conflictAutoPoll = document.getElementById('conflictAutoPoll');
+  var conflictState = document.getElementById('conflictState');
+  var conflictList = document.getElementById('conflictList');
+  var conflictStatus = document.getElementById('conflictStatus');
+  var SEVERITY_BOXES = {
+    blocker: document.getElementById('sevBlocker'),
+    high: document.getElementById('sevHigh'),
+    medium: document.getElementById('sevMedium'),
+    low: document.getElementById('sevLow')
+  };
+  var lastConflicts = null;
+  var conflictBusy = false;
+  var conflictTimer = null;
+
+  function severityShown(severity) {
+    var box = SEVERITY_BOXES[severity];
+    // Unknown severities are never hidden by a filter they cannot match.
+    return box ? box.checked !== false : true;
+  }
+
+  function conflictItem(conflict) {
+    var severity = typeof conflict.severity === 'string' ? conflict.severity : 'unknown';
+    var item = el('li', 'conflict sev-' + severity);
+    var head = el('div', 'meta');
+    head.appendChild(el('code', null, String(conflict.code || '?')));
+    head.appendChild(el('span', null, severity));
+    head.appendChild(el('span', null, String(conflict.kind || '?') + ' · ' + String(conflict.key || '?')));
+    item.appendChild(head);
+    item.appendChild(el('div', null, String(conflict.summary || conflict.id || '')));
+    var owners = Array.isArray(conflict.owners) ? conflict.owners.map(function (o) {
+      return o && typeof o === 'object' ? String(o.owner) : String(o);
+    }) : [];
+    if (owners.length) item.appendChild(el('div', 'meta', '占用方：' + owners.join(', ')));
+    var raw = el('details');
+    raw.appendChild(el('summary', null, '原始记录'));
+    raw.appendChild(el('pre', null, JSON.stringify(conflict, null, 2)));
+    item.appendChild(raw);
+    return item;
+  }
+
+  function renderConflicts() {
+    conflictList.replaceChildren();
+    if (!lastConflicts) return;
+    var shown = lastConflicts.filter(function (c) { return c && severityShown(c.severity); });
+    if (lastConflicts.length === 0) {
+      showState(conflictState, 'good', '✓ 未检测到冲突');
+    } else if (shown.length === 0) {
+      showState(conflictState, 'warn', '有 ' + lastConflicts.length + ' 条冲突，但都被严重度过滤隐藏');
+    } else {
+      showState(conflictState, '', '');
+    }
+    shown.forEach(function (c) { conflictList.appendChild(conflictItem(c)); });
+  }
+
+  function loadConflicts() {
+    if (conflictBusy) return Promise.resolve();
+    conflictBusy = true;
+    btnConflictRefresh.disabled = true;
+    return fetch('/api/conflict-report', { headers: { accept: 'application/json' }, cache: 'no-store' })
+      .then(readJson)
+      .then(function (r) {
+        var stamp = new Date().toLocaleTimeString();
+        if (r.status === 503) {
+          lastConflicts = null;
+          conflictList.replaceChildren();
+          showState(conflictState, 'warn', '冲突服务未就绪' + codeSuffix(r.data) + '：无法判断是否存在冲突');
+          conflictStatus.textContent = '服务未就绪 · 最后检查 ' + stamp;
+          return;
+        }
+        if (!r.ok || !r.data || !Array.isArray(r.data.conflicts)) {
+          lastConflicts = null;
+          conflictList.replaceChildren();
+          showState(conflictState, 'bad', '读取失败：HTTP ' + r.status + codeSuffix(r.data));
+          conflictStatus.textContent = '读取失败 · 最后检查 ' + stamp;
+          return;
+        }
+        lastConflicts = r.data.conflicts;
+        var claims = Array.isArray(r.data.claims) ? r.data.claims.length : 0;
+        renderConflicts();
+        conflictStatus.textContent = '冲突 ' + lastConflicts.length + ' 条 · 占用声明 ' + claims + ' 条 · 最后检查 ' + stamp;
+      })
+      .catch(function (error) {
+        lastConflicts = null;
+        conflictList.replaceChildren();
+        showState(conflictState, 'bad', '请求出错：' + String(error));
+        conflictStatus.textContent = '请求出错 · 最后检查 ' + new Date().toLocaleTimeString();
+      })
+      .finally(function () {
+        conflictBusy = false;
+        btnConflictRefresh.disabled = false;
+      });
+  }
+
+  btnConflictRefresh.addEventListener('click', function () { loadConflicts(); });
+  Object.keys(SEVERITY_BOXES).forEach(function (sev) {
+    SEVERITY_BOXES[sev].addEventListener('change', renderConflicts);
+  });
+  conflictAutoPoll.addEventListener('change', function () {
+    if (conflictTimer !== null) { clearInterval(conflictTimer); conflictTimer = null; }
+    if (conflictAutoPoll.checked) {
+      loadConflicts();
+      conflictTimer = setInterval(loadConflicts, 5000);
+    }
+  });
+
+  // ── Phase 4: repair preview ───────────────────────────────────────
+  // The server reads the document by allow-listed name and reads the approval
+  // from its own approvals directory; this page sends only {name, plan}.
+  var repairDocument = document.getElementById('repairDocument');
+  var repairTargetsState = document.getElementById('repairTargetsState');
+  var repairPlan = document.getElementById('repairPlan');
+  var btnRepairPreview = document.getElementById('btnRepairPreview');
+  var btnRepairApply = document.getElementById('btnRepairApply');
+  var repairState = document.getElementById('repairState');
+  var repairDigests = document.getElementById('repairDigests');
+  var repairOps = document.getElementById('repairOps');
+  var repairAfterBox = document.getElementById('repairAfterBox');
+  var repairAfter = document.getElementById('repairAfter');
+  var repairResultBox = document.getElementById('repairResultBox');
+  var repairResult = document.getElementById('repairResult');
+  var repairBusy = false;
+  var previewedBody = null;
+  var repairTargetsReady = false;
+  var repairApplyEnabled = false;
+
+  // Operations that switch an entry off are shown in red. set-entry-flag with
+  // value=true writes "disabled: true", so it disables just like disable-conflicting.
+  function isDangerOp(op) {
+    if (!op || typeof op !== 'object') return false;
+    if (op.kind === 'disable-conflicting') return true;
+    return op.kind === 'set-entry-flag' && op.value === true;
+  }
+
+  function updateRepairButtons() {
+    btnRepairPreview.disabled = repairBusy || !repairTargetsReady;
+    btnRepairApply.disabled = repairBusy || previewedBody === null || !repairApplyEnabled;
+  }
+
+  function setRepairBusy(busy) {
+    repairBusy = busy;
+    updateRepairButtons();
+  }
+
+  function invalidatePreview(message) {
+    var had = previewedBody !== null;
+    previewedBody = null;
+    updateRepairButtons();
+    if (had && message) showState(repairState, 'warn', message);
+  }
+
+  function clearPreviewOutput() {
+    repairOps.replaceChildren();
+    repairDigests.hidden = true;
+    repairDigests.textContent = '';
+    repairAfterBox.hidden = true;
+    repairAfter.textContent = '';
+    repairResult.textContent = '';
+    repairResultBox.open = false;
+  }
+
+  function loadRepairTargets() {
+    return fetch('/api/repair-targets', { headers: { accept: 'application/json' }, cache: 'no-store' })
+      .then(readJson)
+      .then(function (r) {
+        repairDocument.replaceChildren();
+        if (r.status === 503) {
+          showState(repairTargetsState, 'warn', 'Repair 未就绪' + codeSuffix(r.data));
+          return;
+        }
+        if (!r.ok || !r.data || !Array.isArray(r.data.documents)) {
+          showState(repairTargetsState, 'bad', '读取文档列表失败：HTTP ' + r.status + codeSuffix(r.data));
+          return;
+        }
+        r.data.documents.forEach(function (name) {
+          var option = el('option', null, String(name));
+          option.value = String(name);
+          repairDocument.appendChild(option);
+        });
+        repairApplyEnabled = r.data.applyEnabled === true;
+        repairTargetsReady = r.data.documents.length > 0;
+        if (repairTargetsReady) repairDocument.value = String(r.data.documents[0]);
+        if (!repairTargetsReady) {
+          showState(repairTargetsState, 'warn', '服务端没有允许修复的文档');
+        } else if (!repairApplyEnabled) {
+          showState(repairTargetsState, 'warn', '执行已在服务端关闭（只能预览）');
+        } else {
+          showState(repairTargetsState, '', '');
+        }
+      })
+      .catch(function (error) {
+        showState(repairTargetsState, 'bad', '读取文档列表出错：' + String(error));
+      })
+      .finally(updateRepairButtons);
+  }
+
+  function postJson(url, body) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { accept: 'application/json', 'content-type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify(body)
+    }).then(readJson);
+  }
+
+  function parsePlanInput() {
+    var text = String(repairPlan.value || '').trim();
+    if (!text) return { ok: false, message: '请先填写计划 JSON' };
+    try {
+      var value = JSON.parse(text);
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return { ok: false, message: '计划 JSON 必须是对象' };
+      }
+      return { ok: true, value: value };
+    } catch (error) {
+      return { ok: false, message: '计划 JSON 解析失败：' + String(error) };
+    }
+  }
+
+  function opItem(op) {
+    var kind = op && typeof op === 'object' && typeof op.kind === 'string' ? op.kind : '?';
+    var item = el('li', isDangerOp(op) ? 'op danger' : 'op');
+    var head = el('div', 'meta');
+    head.appendChild(el('code', null, kind));
+    if (op && op.value !== undefined) head.appendChild(el('span', null, 'value=' + String(op.value)));
+    var edit = op && op.edit && typeof op.edit === 'object' ? op.edit : null;
+    if (edit && edit.line !== undefined) head.appendChild(el('span', null, '第 ' + String(edit.line) + ' 行'));
+    if (edit && edit.fromLine !== undefined) {
+      head.appendChild(el('span', null, '第 ' + String(edit.fromLine) + ' 行 → 第 ' + String(edit.toLine) + ' 行'));
+    }
+    if (isDangerOp(op)) head.appendChild(el('span', null, '会停用条目'));
+    item.appendChild(head);
+    var diff = op && op.diff && typeof op.diff === 'object' ? op.diff : null;
+    if (diff) {
+      var pre = el('pre');
+      if (diff.removed !== null && diff.removed !== undefined) pre.appendChild(el('div', 'diff-removed', '- ' + String(diff.removed)));
+      pre.appendChild(el('div', 'diff-added', '+ ' + String(diff.added)));
+      item.appendChild(pre);
+    } else {
+      item.appendChild(el('div', 'meta', '没有逐行 diff（整段移动）'));
+    }
+    return item;
+  }
+
+  function showDigests(data) {
+    repairDigests.hidden = false;
+    repairDigests.textContent = 'before=' + String(data.beforeDigest || '?') +
+      ' · after=' + String(data.afterDigest || '?') + ' · planDigest=' + String(data.planDigest || '?');
+  }
+
+  repairPlan.addEventListener('input', function () { invalidatePreview('计划已修改，请重新预览'); });
+  repairDocument.addEventListener('change', function () { invalidatePreview('文档已切换，请重新预览'); });
+
+  btnRepairPreview.addEventListener('click', function () {
+    if (repairBusy || !repairTargetsReady) return;
+    var input = parsePlanInput();
+    previewedBody = null;
+    clearPreviewOutput();
+    if (!input.ok) { showState(repairState, 'bad', input.message); updateRepairButtons(); return; }
+    var body = { name: String(repairDocument.value), plan: input.value };
+    setRepairBusy(true);
+    postJson('/api/repair-preview', body)
+      .then(function (r) {
+        if (r.status === 503) {
+          showState(repairState, 'warn', 'Repair 未就绪' + codeSuffix(r.data));
+          return;
+        }
+        if (!r.ok || !r.data) {
+          showState(repairState, 'bad', '预览失败：HTTP ' + r.status + codeSuffix(r.data) +
+            (r.data && r.data.reason ? ' ' + String(r.data.reason) : ''));
+          return;
+        }
+        var ops = Array.isArray(r.data.operations) ? r.data.operations : [];
+        ops.forEach(function (op) { repairOps.appendChild(opItem(op)); });
+        showDigests(r.data);
+        if (typeof r.data.afterText === 'string') {
+          repairAfter.textContent = r.data.afterText;
+          repairAfterBox.hidden = false;
+        } else if (r.data.afterTextWithheld === true) {
+          repairAfter.textContent = '修复后全文过大，未返回；以 after 摘要为准';
+          repairAfterBox.hidden = false;
+        }
+        if (r.data.valid === true) {
+          previewedBody = body;
+          showState(repairState, 'good', '预览就绪：' + ops.length + ' 项操作' +
+            (repairApplyEnabled ? '，确认后可执行' : '；执行已在服务端关闭'));
+        } else {
+          var issues = Array.isArray(r.data.issues) ? r.data.issues.map(String).join(', ') : '';
+          showState(repairState, 'bad', '预览不可执行（' + String(r.data.verdict || 'unknown') + '）' + (issues ? '：' + issues : ''));
+        }
+      })
+      .catch(function (error) { showState(repairState, 'bad', '请求出错：' + String(error)); })
+      .finally(function () { setRepairBusy(false); });
+  });
+
+  btnRepairApply.addEventListener('click', function () {
+    if (repairBusy || previewedBody === null || !repairApplyEnabled) return;
+    var body = previewedBody;
+    setRepairBusy(true);
+    postJson('/api/repair-apply', body)
+      .then(function (r) {
+        repairResult.textContent = r.data ? JSON.stringify(r.data, null, 2) : r.text;
+        repairResultBox.open = true;
+        if (r.ok && r.data && r.data.status === 'applied') {
+          showState(repairState, 'good', '已执行：status=applied');
+          previewedBody = null;
+          return;
+        }
+        // Anything but "applied" invalidates the preview: the document or the
+        // approval may have changed, so the next attempt starts from a new preview.
+        previewedBody = null;
+        if (r.status === 409 && r.data) {
+          var what = r.data.code === 'REPAIR_APPROVAL_UNREADABLE' ? '服务端审批文件不可读' : '缺少服务端审批';
+          showState(repairState, 'bad', what + '，planDigest=' + String(r.data.planDigest || '?'));
+        } else if (r.status === 403) {
+          showState(repairState, 'bad', '执行已在服务端关闭' + codeSuffix(r.data));
+        } else if (r.status === 503) {
+          showState(repairState, 'warn', 'Repair 未就绪' + codeSuffix(r.data));
+        } else {
+          var reasons = r.data && Array.isArray(r.data.reasons) ? r.data.reasons.map(String).join(', ') : '';
+          showState(repairState, 'bad', '执行未完成：HTTP ' + r.status + (r.data && r.data.status ? ' status=' + String(r.data.status) : '') + (reasons ? '：' + reasons : codeSuffix(r.data)));
+        }
+      })
+      .catch(function (error) {
+        previewedBody = null;
+        showState(repairState, 'bad', '请求出错：' + String(error));
+      })
+      .finally(function () { setRepairBusy(false); });
+  });
+
+  updateRepairButtons();
+  loadRepairTargets();
 }());
 </script>
 </body>

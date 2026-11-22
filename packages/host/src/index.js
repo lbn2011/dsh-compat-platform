@@ -4,8 +4,16 @@
  *
  * WHAT THIS PLUGIN IS: a host plugin in the shapes the installed host uses —
  * `name`, `inject`, `apply(ctx, config)` — registering exactly two exact-path
- * routes on the composition's own `webServer` service. It analyses nothing,
- * reads exactly one configured file, and writes nothing.
+ * routes on the composition's own `webServer` service. The envelope routes analyse
+ * nothing and read exactly one configured file.
+ *
+ * ONE WRITE PATH EXISTS. The diagnostic API (`./api.js`) mounts
+ * `POST /api/repair-apply`, which writes one document named in
+ * `config.repair.documents` inside `config.repair.root`. It is off unless
+ * `config.repair.applyEnabled` is true, and it needs an approval file in
+ * `config.repair.approvalsDir`: an approval is only as trustworthy as whoever can
+ * write that directory (the host operator), and its `approver` is a label, not
+ * authentication. Without a `config.repair` section nothing is written.
  *
  * WHAT IT IS NOT: a second HTTP server, a Loader, a registry, or a client-UI
  * package. The page is a host route, and the record must say so: the native
@@ -210,8 +218,11 @@ export function apply(ctx, config) {
   // `connection` service. Its routes inherit that carrier's trust policy; with no
   // carrier there is no fence, and an unfenced diagnostic route must not exist.
   // This is independent of the envelope page, which takes its own config.
+  // `config.repair` is validated by `readRepairConfig` inside the API; a malformed
+  // section is a TypeError at load that names the field, like every other option.
   applyHostApi(ctx, {
     includeMessageText: isPlainRecord(config) && config.includeMessageText === true,
+    repair: isPlainRecord(config) ? config.repair : undefined,
   })
 
   const settings = readOptions(config)

@@ -63,9 +63,15 @@ br_envelope_enter() { # unit run-dir; call before ANY workload or syntax subproc
   else bad=1
   fi
   br_record "$BR_RUN/envelope-runtime.txt" 'query_rc=%s\n%s\n' "$bus_rc" "$bus" || :
+  # For the Chrome heavy-test slice the declared task limit differs from BR_TASKS.
+  # Both values come from policy constants; the payload cannot forge them.
+  local expected_pids=$BR_TASKS
+  if [[ $BR_UNIT == e2-chrome-batch-* ]]; then
+    expected_pids=$BR_TASKS_CHROME
+  fi
   [ "$mem" = "$BR_MEMORY_BYTES" ] || bad=1
   [ "$swap" = "$BR_SWAP_BYTES" ] || bad=1
-  [ "$pids" = "$BR_TASKS" ] || bad=1
+  [ "$pids" = "$expected_pids" ] || bad=1
   [ "$cpu" = "$BR_CPU_MAX" ] || bad=1
   [ "$type" = exec ] || bad=1
   [ "$runtime" = "$BR_RUNTIME_USEC" ] || bad=1

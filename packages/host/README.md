@@ -1,8 +1,15 @@
 # `dsh-compat-diagnostics-ui` (host package)
 
 A **host plugin** that serves one read-only view of an existing diagnostic
-envelope on the composition's own `webServer` service. It analyses nothing,
-reads exactly one configured file per request, and writes nothing.
+envelope on the composition's own `webServer` service, plus diagnostic API routes
+(page snapshot, frontend log, conflict report, repair preview/apply). It analyses
+nothing itself.
+
+**It has exactly one write path:** `POST /api/repair-apply`, which rewrites one
+allow-listed document inside the configured `repair.root` (keeping a `.before`
+copy). That route is off unless `repair.applyEnabled` is `true`, and it applies
+only a plan whose approval file an operator has put into `repair.approvalsDir`.
+Every other route reads only. See [Repair routes and their trust boundary](#repair-routes-and-their-trust-boundary).
 
 Status: **EXECUTED** — earlier rounds on 2026-11-08 (second green, 15/15 tests,
 seven HTTP assertions) and a later bounded round on 2026-11-11 covering the
@@ -29,12 +36,14 @@ Design: [`docs/requirements-and-design/2026-11-08-read-only-diagnostics-gui-desi
 ```js
 export const name = 'dsh-compat-diagnostics-ui'
 export const inject = ['webServer']
-export function apply(ctx, config) // config: { envelopePath, pagePath?, envelopeRoutePath? }
+export function apply(ctx, config) // config: { envelopePath, pagePath?, envelopeRoutePath?, includeMessageText?, repair? }
 ```
 
 - `envelopePath` — required, non-empty; resolved against `process.cwd()`.
 - `pagePath` — defaults to `/compat-diagnostics`.
 - `envelopeRoutePath` — defaults to `/compat-diagnostics/envelope`.
+- `repair` — optional `{ root, documents, applyEnabled?, approvalsDir? }`; see below.
+  Absent or with no documents, the repair routes answer `503 REPAIR_NOT_CONFIGURED`.
 - Route paths must be absolute pathnames without a trailing slash, and the two
   must differ. Both routes are `kind: 'exact'`.
 - There is no schemastery `Config` on purpose: this package declares **no
@@ -87,7 +96,7 @@ absolute origin, touches no process API, and prints `certification: false` and
 
 ## The two diagnostic endpoints (E1)
 
-`src/api.js` mounts two read-only routes when the composition provides a `connection`
+`src/api.js` mounts these two read-only routes (and the conflict/repair routes below) when the composition provides a `connection`
 service, and mounts **nothing** when it does not — a plugin whose routes cannot inherit
 the carrier's trust policy must not invent its own.
 
@@ -127,6 +136,67 @@ parse.
 `memory_peak=41201664` and `pids_peak=20` both measured. The 28 endpoint tests in
 `tests/api.test.js` are matched name-by-name against the TAP headers, so the total is not
 standing in for a file that failed to load. Receipts: `docs/testing/2026-11-12-repair-d2-e1.md` §3.
+
+## Conflict report (Phase 3)
+
+`GET /api/conflict-report` reads the conflict service the composition provides as
+`conflictService` or `compatConflicts` (the analyzer's `createConflictService`). It
+answers `{ claims, conflicts, summary: { byKind, bySeverity } }`.
+
+- No service: `503 {"code":"CONFLICT_SERVICE_UNAVAILABLE"}`.
+- The service throws, or answers something that is not a list:
+  `500 {"code":"CONFLICT_SERVICE_ERROR"}`. The message goes to the host log, never
+  into the response. An error is **never** reported as an empty list, so the page
+  can only say 「未检测到冲突」 after a real, successful, empty answer.
+
+## Repair routes and their trust boundary
+
+The repair routes call the real `dsh-compat-repair` package (`previewRepair`,
+`planDigest`, `readFixture`, `applyApproved`). It is loaded lazily on first use: first
+by package name (`dsh-compat-repair/repair-preview`, `/repair-plan`,
+`/fixture-applier`; declared as an optional peer dependency), then from the monorepo
+sibling `../../repair/src/`. If both fail, the preview and apply routes answer
+`503 {"code":"REPAIR_PACKAGE_UNAVAILABLE"}`. **An installed tarball of this package
+does not contain `../../repair`**, so an installation needs `dsh-compat-repair` in the
+same `node_modules`, or those two routes stay 503.
+
+Configuration (`config.repair`; unknown keys and relative paths throw a `TypeError`):
+
+| Key | Meaning |
+| --- | --- |
+| `root` | absolute directory holding the documents |
+| `documents` | allow-list of bare file names inside `root` (no `/`, `\`, `..`) |
+| `applyEnabled` | `false` by default; `true` requires `approvalsDir` |
+| `approvalsDir` | absolute directory, different from `root`, holding `<planDigest>.json` approval files |
+
+| Route | Body | Answers |
+| --- | --- | --- |
+| `GET /api/repair-targets` | – | `{ documents, applyEnabled }` (names only, never a path) |
+| `POST /api/repair-preview` | `{ name, plan }` | `{ name, verdict, valid, issues, operations: [{ kind, value?, edit, diff }], beforeDigest, afterDigest, planDigest, afterText \| null, afterTextWithheld, limitations }` |
+| `POST /api/repair-apply` | `{ name, plan }` | `200` receipt with `status: "applied"`; `422` receipt for `refused`/`partial` |
+
+The server reads the document itself; a client `beforeText` is refused
+(`400 BODY_UNKNOWN_FIELD`), and so is any `approval` field on apply
+(`400 BODY_APPROVAL_NOT_ACCEPTED`). Bodies above 1 MiB are `413 BODY_TOO_LARGE`,
+checked against `content-length` and while streaming. `afterText` above 64 KiB is
+withheld; the digests are still returned.
+
+Apply checks, in order: not configured → `503`; `applyEnabled` false →
+`403 REPAIR_APPLY_DISABLED`; package missing → `503`; body/name/plan errors → `400`;
+then, one apply at a time, the approval file `approvalsDir/<planDigest>.json` (opened
+without following symlinks, at most 16 KiB): missing → `409 REPAIR_APPROVAL_MISSING`
+with the server's `planDigest`, unreadable → `409 REPAIR_APPROVAL_UNREADABLE`. Only
+then does `applyApproved` run, which re-checks the approval (digest match, expiry,
+`allow`) and the document digest before writing.
+
+**Trust boundary.** The approval file is not authentication. Requests reach these
+routes through the carrier's `connection` fence; anyone past that fence can preview,
+and can apply any plan that already has an approval file. So the approval is exactly
+as trustworthy as write access to `approvalsDir`. The `approver` field inside it is a
+label for the receipt, not an identity. Keep `applyEnabled` off unless that directory
+is writable only by the operator.
+
+The host mounts no `/api/chrome-capture` route.
 
 ## Tests
 
@@ -177,3 +247,8 @@ client package that really provides the slot.
 - No browser has rendered this page. HTTP-level bytes were verified; the page's
   script never executed on a real browser engine.
 - No plugin is loaded or activated by this package.
+- The host mounts **no** `/api/chrome-capture` route (宿主内没有 chrome-capture 接口).
+  `src/chrome-driver.js` is only used by `scripts/e2-chrome-batch` inside the bounded
+  runner; no request to this plugin starts a browser.
+- The repair approval is a file, not authentication: whoever can write
+  `repair.approvalsDir` can approve any plan. The `approver` field is a label.

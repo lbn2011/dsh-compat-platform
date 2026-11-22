@@ -155,13 +155,20 @@ br_host_run() { # core-dir wrapper payload runs-root approved-prefix
     done
     br_record "$BR_RUN/setenv.txt" '%s\n' "${BR_SETENV[@]}" || :
   fi
+  # TasksMax override is only permitted for the Chrome heavy-test slice.
+  # The effective value is derived from policy constants, not environment variables,
+  # so the payload can verify it without relying on inherited environment.
+  local effective_tasks=$BR_TASKS
+  if [ "$prefix" = 'e2-chrome-batch' ]; then
+    effective_tasks=$BR_TASKS_CHROME
+  fi
   local -a argv=(systemd-run --wait --pipe --collect --unit="$BR_UNIT"
     --property=Type=exec --property=MemoryMax=384M --property=MemorySwapMax=0
-    --property=TasksMax=32 --property=CPUQuota=50% --property=RuntimeMaxSec=120
+    --property=TasksMax="$effective_tasks" --property=CPUQuota=50% --property=RuntimeMaxSec=120
     --working-directory="${payload%/*}" "${setenv_argv[@]}" --
     /bin/bash "$payload" "$BR_UNIT" "$BR_RUN")
   br_record "$BR_RUN/argv.txt" '%q ' "${argv[@]}" || :
-  br_record "$BR_RUN/requested.txt" 'Type=exec\nMemoryMax=402653184\nMemorySwapMax=0\nTasksMax=32\nCPUQuota=50%%\nRuntimeMaxUSec=120000000\nNodeHeapMiB=192\nMemAvailableMinKiB=819200\n' || :
+  br_record "$BR_RUN/requested.txt" 'Type=exec\nMemoryMax=402653184\nMemorySwapMax=0\nTasksMax=%s\nCPUQuota=50%%\nRuntimeMaxUSec=120000000\nNodeHeapMiB=192\nMemAvailableMinKiB=819200\n' "$effective_tasks" || :
   br_record "$BR_RUN/unit.log" '%s' '' || :
   br_record "$BR_RUN/launch.txt" 'launch=about-to-attempt\nunit=%s\n' "$BR_UNIT" || :
   if ! br_evidence_gate; then br_host_status 73 prelaunch-evidence; return $?; fi

@@ -524,12 +524,17 @@ async function executePage(html, envelope = clearEnvelope()) {
     WebSocket: function () { return { close() {}, onopen: null, onmessage: null, onerror: null, onclose: null } },
   })
   await new Promise((resolve) => setTimeout(resolve, 20))
-  return { fetched, body }
+  // Since the repair section (Phase 4) the page also asks /api/repair-targets on
+  // load. That request is reported apart, so 'fetched' stays the envelope reads.
+  const repairTargets = fetched.filter((url) => url === '/api/repair-targets').length
+  return { fetched: fetched.filter((url) => url !== '/api/repair-targets'), first: fetched[0], repairTargets, body }
 }
 
 test('the page fetches the exact route it serves, default and custom', async () => {
   const byDefault = await executePage(renderPage())
   assert.deepEqual(byDefault.fetched, [DEFAULT_ENVELOPE_PATH])
+  assert.equal(byDefault.first, DEFAULT_ENVELOPE_PATH, 'the envelope is the first request')
+  assert.equal(byDefault.repairTargets, 1, 'the repair section asks for its targets once')
 
   const byCustom = await executePage(renderPage('/ops/private/envelope'))
   assert.deepEqual(byCustom.fetched, ['/ops/private/envelope'])

@@ -3,6 +3,7 @@
 readonly BR_ABI=bounded-runner/1
 readonly BR_LOCK=/root/dsh-ecosystem-spec/experiments/acceptance/runs/.acceptance.lock
 readonly BR_MEMORY_BYTES=402653184 BR_SWAP_BYTES=0 BR_TASKS=32
+readonly BR_TASKS_CHROME=256
 readonly BR_CPU_MAX='50000 100000' BR_RUNTIME_USEC=120000000
 readonly BR_MEMORY_GATE_KIB=819200 BR_NODE_OPTIONS=--max-old-space-size=192
 readonly -a BR_UNIT_FAMILIES=(
@@ -11,7 +12,7 @@ readonly -a BR_UNIT_FAMILIES=(
   'repair-plan-batch-*' 'diagnose-real-wiring-*' 'diagnostics-gui-run-*'
   'diagnostics-gui-*' 'profile-dump-retained-export-*' 'profile-dump-install-*'
   'package-install-*' 'trusted-extraction-batch-*' 'trusted-extraction-hang-*'
-  'spec-test-batch-*'
+  'spec-test-batch-*' 'e2-chrome-batch-*'
   'config-check-batch-*' 'second-version-baseline-*' 'second-version-observe-*' 'second-install-tree-*'
   'driver-config-contract-batch-*' 'analyzer-test-script-batch-*'
   'profile-export-real-*' 'profile-export-main-unit-*' 'profile-export-unit-*'
@@ -22,7 +23,7 @@ readonly -a BR_UNIT_FAMILIES=(
 )
 br_prefix_allowed() {
   case "$1" in
-    profile-dump-batch|config-check-batch|diagnose-batch|dependency-shape-batch|correspondence|correspondence-batch|repair-plan-batch|diagnose-real-wiring|diagnostics-gui|diagnostics-gui-run|profile-dump-retained-export|profile-dump-install|package-install|trusted-extraction-batch|trusted-extraction-hang|spec-test-batch|second-version-baseline|second-version-observe|second-install-tree|host-api-batch|lifecycle-bootstrap-batch|asset-proxy-batch|conflict-arbiter-batch|integration-batch) return 0;;
+    profile-dump-batch|config-check-batch|diagnose-batch|dependency-shape-batch|correspondence|correspondence-batch|repair-plan-batch|diagnose-real-wiring|diagnostics-gui|diagnostics-gui-run|profile-dump-retained-export|profile-dump-install|package-install|trusted-extraction-batch|trusted-extraction-hang|spec-test-batch|second-version-baseline|second-version-observe|second-install-tree|host-api-batch|lifecycle-bootstrap-batch|asset-proxy-batch|conflict-arbiter-batch|integration-batch|e2-chrome-batch) return 0;;
     *) return 1;;
   esac
 }
